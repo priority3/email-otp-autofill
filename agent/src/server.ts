@@ -5,7 +5,7 @@ import { AGENT_HOST, AGENT_PORT } from "./constants.js";
 import { cors, requireClientHeader } from "./http/middleware.js";
 import { OtpStore } from "./otp/store.js";
 import { ProviderManager } from "./providers/manager.js";
-import { secretSet } from "./storage/secrets.js";
+import { secretGet, secretSet } from "./storage/secrets.js";
 
 function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefined {
   if (!raw) return undefined;
@@ -33,19 +33,26 @@ export async function startServer() {
 
   app.get("/v1/status", async (_req, res) => {
     const cfg = mgr.config;
-    const outlookConnected = cfg.outlook.mode === "oauth" ? await mgr.getOutlookOAuth().hasRefreshToken() : undefined;
+    const qqConfigured = cfg.qq.email ? Boolean(await secretGet(`qq:${cfg.qq.email}`)) : false;
+    const outlookOauthConnected =
+      cfg.outlook.mode === "oauth" ? await mgr.getOutlookOAuth().hasRefreshToken() : false;
+    const outlookImapConfigured =
+      cfg.outlook.mode === "imap" && cfg.outlook.imapEmail
+        ? Boolean(await secretGet(`outlook_imap:${cfg.outlook.imapEmail}`))
+        : false;
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
       config: {
         pollIntervalMs: cfg.pollIntervalMs,
-        qq: { email: cfg.qq.email ?? null },
+        qq: { email: cfg.qq.email ?? null, configured: qqConfigured },
         outlook: {
           mode: cfg.outlook.mode,
           clientId: cfg.outlook.clientId ?? null,
           clientIdSet: Boolean(cfg.outlook.clientId),
           imapEmail: cfg.outlook.imapEmail ?? null,
-          oauthConnected: outlookConnected ?? null,
+          imapConfigured: outlookImapConfigured,
+          oauthConnected: outlookOauthConnected,
         },
       },
     });

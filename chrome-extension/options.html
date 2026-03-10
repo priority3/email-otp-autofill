@@ -40,6 +40,7 @@
             <div style="font-weight:600;">QQ Mail (IMAP)</div>
             <div class="muted" style="margin-top:6px;">Uses your QQ IMAP授权码. Stored in macOS Keychain by the agent.</div>
           </div>
+          <span id="qqState" class="pill">Not configured</span>
           <button id="qqClear" class="danger">Clear</button>
         </div>
 
@@ -48,6 +49,7 @@
 
         <label for="qqAuthCode">QQ IMAP 授权码</label>
         <input id="qqAuthCode" placeholder="授权码（不是QQ登录密码）" />
+        <div class="hint">出于安全考虑，保存后不会回显授权码。</div>
 
         <div class="row" style="margin-top:12px;">
           <button id="qqSave" class="primary">Save QQ</button>
@@ -63,6 +65,7 @@
             <div style="font-weight:600;">Outlook</div>
             <div class="muted" style="margin-top:6px;">Choose OAuth (Graph) or IMAP mode.</div>
           </div>
+          <span id="outlookState" class="pill">Not configured</span>
           <button id="outlookClear" class="danger">Clear</button>
         </div>
 
@@ -95,6 +98,7 @@
           <input id="outlookImapEmail" placeholder="you@outlook.com" />
           <label for="outlookImapPass">App Password</label>
           <input id="outlookImapPass" placeholder="App password (recommended), or normal password if IMAP allows" />
+          <div class="hint">出于安全考虑，保存后不会回显密码。</div>
           <div class="row" style="margin-top:12px;">
             <button id="outlookImapSave" class="primary">Save Outlook IMAP</button>
             <span id="outlookImapMsg" class="muted"></span>

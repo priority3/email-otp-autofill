@@ -15,6 +15,23 @@ function setAgentStatus(ok, detail) {
   setMsg("agentStatus", ok ? `OK · ${detail || ""}` : `DOWN · ${detail || ""}`);
 }
 
+async function loadLastConfig() {
+  const raw = await chrome.storage.local.get([
+    "lastQqEmail",
+    "lastOutlookMode",
+    "lastOutlookClientId",
+    "lastOutlookImapEmail"
+  ]);
+
+  if (raw.lastQqEmail && !$("qqEmail").value) $("qqEmail").value = raw.lastQqEmail;
+  if (raw.lastOutlookMode) {
+    $("outlookMode").value = raw.lastOutlookMode;
+    renderOutlookMode($("outlookMode").value);
+  }
+  if (raw.lastOutlookClientId && !$("outlookClientId").value) $("outlookClientId").value = raw.lastOutlookClientId;
+  if (raw.lastOutlookImapEmail && !$("outlookImapEmail").value) $("outlookImapEmail").value = raw.lastOutlookImapEmail;
+}
+
 async function loadExtSettings() {
   const raw = await chrome.storage.local.get(["agentBaseUrl", "maxAgeSec"]);
   $("agentBaseUrl").value = raw.agentBaseUrl || "http://127.0.0.1:17373";
@@ -52,14 +69,32 @@ async function refreshAgentStatus() {
     setAgentStatus(true, `${r.status.agent.host}:${r.status.agent.port}`);
 
     const cfg = r.status.config || {};
-    if (cfg.qq && cfg.qq.email) $("qqEmail").value = cfg.qq.email;
+    const cache = {};
+    if (cfg.qq) {
+      if (cfg.qq.email) {
+        $("qqEmail").value = cfg.qq.email;
+        cache.lastQqEmail = cfg.qq.email;
+      }
+      setMsg("qqState", cfg.qq.configured ? "Configured" : "Not configured");
+    }
 
     if (cfg.outlook) {
       $("outlookMode").value = cfg.outlook.mode || "oauth";
       renderOutlookMode($("outlookMode").value);
+      cache.lastOutlookMode = $("outlookMode").value;
       if (cfg.outlook.clientId) $("outlookClientId").value = cfg.outlook.clientId;
+      if (cfg.outlook.clientId) cache.lastOutlookClientId = cfg.outlook.clientId;
       if (cfg.outlook.imapEmail) $("outlookImapEmail").value = cfg.outlook.imapEmail;
+      if (cfg.outlook.imapEmail) cache.lastOutlookImapEmail = cfg.outlook.imapEmail;
+
+      if ($("outlookMode").value === "oauth") {
+        setMsg("outlookState", cfg.outlook.oauthConnected ? "OAuth connected" : "OAuth not connected");
+      } else {
+        setMsg("outlookState", cfg.outlook.imapConfigured ? "IMAP configured" : "IMAP not configured");
+      }
     }
+
+    await chrome.storage.local.set(cache);
   } catch (e) {
     setAgentStatus(false, String(e && e.message ? e.message : e));
   }
@@ -67,6 +102,7 @@ async function refreshAgentStatus() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   await loadExtSettings();
+  await loadLastConfig();
   renderOutlookMode($("outlookMode").value);
   await refreshAgentStatus();
 
@@ -80,6 +116,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const authCode = $("qqAuthCode").value.trim();
       const r = await bg({ type: "BG_QQ_CONFIG", email, authCode });
       setMsg("qqMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
+      if (r && r.ok) await chrome.storage.local.set({ lastQqEmail: email });
       $("qqAuthCode").value = "";
       await refreshAgentStatus();
     } catch (e) {
@@ -110,6 +147,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const clientId = $("outlookClientId").value.trim();
       const r = await bg({ type: "BG_OUTLOOK_CONFIG", payload: { mode: "oauth", clientId } });
       setMsg("outlookOauthMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
+      if (r && r.ok) await chrome.storage.local.set({ lastOutlookMode: "oauth", lastOutlookClientId: clientId });
       await refreshAgentStatus();
     } catch (e) {
       setMsg("outlookOauthMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
@@ -166,6 +204,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         payload: { mode: "imap", email, appPassword }
       });
       setMsg("outlookImapMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
+      if (r && r.ok) await chrome.storage.local.set({ lastOutlookMode: "imap", lastOutlookImapEmail: email });
       $("outlookImapPass").value = "";
       await refreshAgentStatus();
     } catch (e) {
