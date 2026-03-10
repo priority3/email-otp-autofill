@@ -15,6 +15,16 @@ function setAgentStatus(ok, detail) {
   setMsg("agentStatus", ok ? `OK · ${detail || ""}` : `DOWN · ${detail || ""}`);
 }
 
+function originPatternFromBaseUrl(baseUrl) {
+  try {
+    const u = new URL(baseUrl);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return `${u.protocol}//${u.host}/*`;
+  } catch {
+    return null;
+  }
+}
+
 async function loadLastConfig() {
   const raw = await chrome.storage.local.get([
     "lastQqEmail",
@@ -33,15 +43,32 @@ async function loadLastConfig() {
 }
 
 async function loadExtSettings() {
-  const raw = await chrome.storage.local.get(["agentBaseUrl", "maxAgeSec"]);
+  const raw = await chrome.storage.local.get(["agentBaseUrl", "agentApiKey", "maxAgeSec"]);
   $("agentBaseUrl").value = raw.agentBaseUrl || "http://127.0.0.1:17373";
+  $("agentApiKey").value = raw.agentApiKey || "";
   $("maxAgeSec").value = String(Number.isFinite(raw.maxAgeSec) ? raw.maxAgeSec : 120);
 }
 
 async function saveExtSettings() {
   const agentBaseUrl = $("agentBaseUrl").value.trim() || "http://127.0.0.1:17373";
+  const agentApiKey = $("agentApiKey").value.trim();
   const maxAgeSec = Math.max(10, Math.min(600, Number($("maxAgeSec").value || "120")));
-  await chrome.storage.local.set({ agentBaseUrl, maxAgeSec });
+  await chrome.storage.local.set({ agentBaseUrl, agentApiKey, maxAgeSec });
+
+  const origin = originPatternFromBaseUrl(agentBaseUrl);
+  // Localhost origin is already in host_permissions.
+  if (origin && origin !== "http://127.0.0.1:17373/*") {
+    try {
+      const granted = await chrome.permissions.request({ origins: [origin] });
+      if (!granted) {
+        setMsg("saveExtMsg", `Permission denied for ${origin}`);
+        return;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   setMsg("saveExtMsg", "Saved.");
   setTimeout(() => setMsg("saveExtMsg", ""), 1200);
 }

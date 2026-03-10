@@ -5,6 +5,7 @@
   "description": "Fetch OTP codes from local agent (QQ Mail / Outlook) and fill into the current page.",
   "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": ["http://127.0.0.1:17373/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "background.js"
   },
@@ -30,4 +31,3 @@
     }
   }
 }
-

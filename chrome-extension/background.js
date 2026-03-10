@@ -1,8 +1,10 @@
 const CLIENT_HEADER_NAME = "x-otp-agent-client";
 const CLIENT_HEADER_VALUE = "email-otp-autofill";
+const API_KEY_HEADER_NAME = "x-otp-agent-key";
 
 const DEFAULTS = {
   agentBaseUrl: "http://127.0.0.1:17373",
+  agentApiKey: "",
   maxAgeSec: 120,
   providers: ["qq", "outlook"],
   autoConsume: true
@@ -12,6 +14,7 @@ async function getSettings() {
   const raw = await chrome.storage.local.get(Object.keys(DEFAULTS));
   return {
     agentBaseUrl: raw.agentBaseUrl || DEFAULTS.agentBaseUrl,
+    agentApiKey: typeof raw.agentApiKey === "string" ? raw.agentApiKey : DEFAULTS.agentApiKey,
     maxAgeSec: Number.isFinite(raw.maxAgeSec) ? raw.maxAgeSec : DEFAULTS.maxAgeSec,
     providers: Array.isArray(raw.providers) && raw.providers.length ? raw.providers : DEFAULTS.providers,
     autoConsume: raw.autoConsume === false ? false : DEFAULTS.autoConsume
@@ -23,6 +26,7 @@ async function agentFetch(path, init = {}) {
   const url = s.agentBaseUrl.replace(/\/$/, "") + path;
   const headers = new Headers(init.headers || {});
   headers.set(CLIENT_HEADER_NAME, CLIENT_HEADER_VALUE);
+  if (s.agentApiKey) headers.set(API_KEY_HEADER_NAME, s.agentApiKey);
   if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
   const res = await fetch(url, { ...init, headers });
   const json = await res.json().catch(() => null);
@@ -161,4 +165,3 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   // Keep the message channel open for async.
   return true;
 });
-

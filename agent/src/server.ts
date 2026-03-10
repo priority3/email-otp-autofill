@@ -2,7 +2,7 @@ import express from "express";
 import { z } from "zod";
 
 import { AGENT_HOST, AGENT_PORT } from "./constants.js";
-import { cors, requireClientHeader } from "./http/middleware.js";
+import { cors, noStore, requireApiKey, requireClientHeader } from "./http/middleware.js";
 import { OtpStore } from "./otp/store.js";
 import { ProviderManager } from "./providers/manager.js";
 import { secretGet, secretSet } from "./storage/secrets.js";
@@ -24,7 +24,9 @@ export async function startServer() {
   const app = express();
   app.disable("x-powered-by");
   app.use(cors);
+  app.use(noStore);
   app.use(express.json({ limit: "256kb" }));
+  app.use(requireApiKey);
   app.use(requireClientHeader);
 
   const store = new OtpStore();

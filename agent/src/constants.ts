@@ -13,6 +13,9 @@ export const AGENT_PORT = (() => {
 export const CLIENT_HEADER_NAME = "x-otp-agent-client";
 export const CLIENT_HEADER_VALUE = APP_ID;
 
+export const API_KEY_HEADER_NAME = "x-otp-agent-key";
+export const API_KEY = process.env.OTP_AGENT_API_KEY?.trim() || "";
+
 const HOME = process.env.HOME?.trim() || "/tmp";
 
 export const DATA_DIR =

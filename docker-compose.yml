@@ -8,9 +8,22 @@ services:
       OTP_AGENT_HOST: 0.0.0.0
       OTP_AGENT_PORT: 17373
       OTP_AGENT_DATA_DIR: /data
+      OTP_AGENT_API_KEY: ${OTP_AGENT_API_KEY:-}
     volumes:
       - ./data:/data
     ports:
       # Bind to localhost only. Use SSH port-forwarding from your laptop for the Chrome extension.
       - "127.0.0.1:17373:17373"
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: email-otp-autofill-cloudflared
+    restart: unless-stopped
+    profiles:
+      - cloudflare
+    depends_on:
+      - agent
+    environment:
+      # Put this in a local .env (do not commit). You can fetch it from Cloudflare API as TUNNEL_TOKEN.
+      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate run

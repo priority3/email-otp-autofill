@@ -23,6 +23,10 @@
         <input id="agentBaseUrl" placeholder="http://127.0.0.1:17373" />
         <div class="hint">Run the agent locally: <span class="code">cd /path/to/email-otp-autofill/agent && npm run dev</span></div>
 
+        <label for="agentApiKey">Agent API Key</label>
+        <input id="agentApiKey" type="password" placeholder="(optional for localhost, required for public domain)" />
+        <div class="hint">If the agent is exposed via a domain (Cloudflare Tunnel), set `OTP_AGENT_API_KEY` on the server and paste the same value here.</div>
+
         <label for="maxAgeSec">Max OTP Age (seconds)</label>
         <input id="maxAgeSec" type="number" min="10" max="600" />
 
