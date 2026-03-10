@@ -1,6 +1,6 @@
 import { extractBestOtp } from "../otp/extract.js";
 import type { OtpStore } from "../otp/store.js";
-import { keychainGet, keychainSet, keychainDelete } from "../storage/keychain.js";
+import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 
 const KC_OUTLOOK_REFRESH = "outlook_oauth:refresh";
 
@@ -64,7 +64,7 @@ export class OutlookOAuthProvider {
   }
 
   async hasRefreshToken(): Promise<boolean> {
-    const rt = await keychainGet(KC_OUTLOOK_REFRESH);
+    const rt = await secretGet(KC_OUTLOOK_REFRESH);
     return Boolean(rt);
   }
 
@@ -74,7 +74,7 @@ export class OutlookOAuthProvider {
   }
 
   async clearAuth(): Promise<void> {
-    await keychainDelete(KC_OUTLOOK_REFRESH);
+    await secretDelete(KC_OUTLOOK_REFRESH);
     this.accessToken = null;
     this.deviceCode = null;
   }
@@ -130,7 +130,7 @@ export class OutlookOAuthProvider {
     }
 
     const tok = json as TokenResponse;
-    if (tok.refresh_token) await keychainSet(KC_OUTLOOK_REFRESH, tok.refresh_token);
+    if (tok.refresh_token) await secretSet(KC_OUTLOOK_REFRESH, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
     this.deviceCode = null;
     return { status: "success", token: { expiresIn: tok.expires_in } };
@@ -153,7 +153,7 @@ export class OutlookOAuthProvider {
     if (!this.clientId) throw new Error("OUTLOOK_CLIENT_ID_NOT_SET");
     if (this.accessToken && Date.now() < this.accessToken.expiresAt - 30_000) return this.accessToken.value;
 
-    const refresh = await keychainGet(KC_OUTLOOK_REFRESH);
+    const refresh = await secretGet(KC_OUTLOOK_REFRESH);
     if (!refresh) throw new Error("OUTLOOK_NOT_CONNECTED");
 
     const url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
@@ -173,7 +173,7 @@ export class OutlookOAuthProvider {
       throw new Error(`refresh_failed:${res.status}:${String((json as any).error || "")}`);
     }
     const tok = json as TokenResponse;
-    if (tok.refresh_token) await keychainSet(KC_OUTLOOK_REFRESH, tok.refresh_token);
+    if (tok.refresh_token) await secretSet(KC_OUTLOOK_REFRESH, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
     return tok.access_token;
   }
@@ -224,4 +224,3 @@ export class OutlookOAuthProvider {
     }
   }
 }
-

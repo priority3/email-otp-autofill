@@ -7,3 +7,5 @@
 # Extension (if you add build tooling later)
 /chrome-extension/dist/
 
+# Docker volume data (config + secrets)
+/data/

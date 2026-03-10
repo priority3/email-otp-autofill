@@ -11,6 +11,7 @@ function run(cmd: string, args: string[]): Promise<{ code: number; stdout: strin
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
+    child.on("error", (err) => resolve({ code: 127, stdout, stderr: String(err?.message || err) }));
     child.on("close", (code) => resolve({ code: code ?? 0, stdout, stderr }));
   });
 }
@@ -45,4 +46,3 @@ export async function keychainDelete(account: string): Promise<void> {
     return;
   }
 }
-

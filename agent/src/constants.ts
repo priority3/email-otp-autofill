@@ -1,6 +1,6 @@
 export const APP_ID = "email-otp-autofill";
 
-export const AGENT_HOST = "127.0.0.1";
+export const AGENT_HOST = process.env.OTP_AGENT_HOST?.trim() || "127.0.0.1";
 export const AGENT_PORT = (() => {
   const raw = process.env.OTP_AGENT_PORT?.trim();
   if (!raw) return 17373;
@@ -13,7 +13,12 @@ export const AGENT_PORT = (() => {
 export const CLIENT_HEADER_NAME = "x-otp-agent-client";
 export const CLIENT_HEADER_VALUE = APP_ID;
 
-export const CONFIG_DIR =
-  process.env.XDG_CONFIG_HOME?.trim() || `${process.env.HOME}/.config`;
-export const CONFIG_PATH = `${CONFIG_DIR}/${APP_ID}/config.json`;
+const HOME = process.env.HOME?.trim() || "/tmp";
 
+export const DATA_DIR =
+  process.env.OTP_AGENT_DATA_DIR?.trim() ||
+  process.env.XDG_CONFIG_HOME?.trim() ||
+  `${HOME}/.config/${APP_ID}`;
+
+export const CONFIG_PATH = `${DATA_DIR}/config.json`;
+export const SECRETS_PATH = `${DATA_DIR}/secrets.json`;

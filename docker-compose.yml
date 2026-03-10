@@ -1,0 +1,16 @@
+services:
+  agent:
+    build:
+      context: ./agent
+    container_name: email-otp-autofill-agent
+    restart: unless-stopped
+    environment:
+      OTP_AGENT_HOST: 0.0.0.0
+      OTP_AGENT_PORT: 17373
+      OTP_AGENT_DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    ports:
+      # Bind to localhost only. Use SSH port-forwarding from your laptop for the Chrome extension.
+      - "127.0.0.1:17373:17373"
+

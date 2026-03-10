@@ -5,7 +5,7 @@ import { AGENT_HOST, AGENT_PORT } from "./constants.js";
 import { cors, requireClientHeader } from "./http/middleware.js";
 import { OtpStore } from "./otp/store.js";
 import { ProviderManager } from "./providers/manager.js";
-import { keychainSet } from "./storage/keychain.js";
+import { secretSet } from "./storage/secrets.js";
 
 function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefined {
   if (!raw) return undefined;
@@ -78,7 +78,7 @@ export async function startServer() {
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
     const { email, authCode } = body.data;
-    await keychainSet(`qq:${email}`, authCode);
+    await secretSet(`qq:${email}`, authCode);
     await mgr.updateConfig((c) => {
       c.qq.email = email;
     });
@@ -109,7 +109,7 @@ export async function startServer() {
       return;
     }
 
-    await keychainSet(`outlook_imap:${data.email}`, data.appPassword);
+    await secretSet(`outlook_imap:${data.email}`, data.appPassword);
     await mgr.updateConfig((c) => {
       c.outlook.mode = "imap";
       c.outlook.imapEmail = data.email;

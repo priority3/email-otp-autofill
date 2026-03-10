@@ -3,7 +3,7 @@ import { OutlookOAuthProvider } from "./outlook-oauth.js";
 import type { OtpStore } from "../otp/store.js";
 import type { AppConfig } from "../storage/config.js";
 import { loadConfig, saveConfig } from "../storage/config.js";
-import { keychainDelete, keychainGet } from "../storage/keychain.js";
+import { secretDelete, secretGet } from "../storage/secrets.js";
 
 function kcQq(email: string) {
   return `qq:${email}`;
@@ -71,7 +71,7 @@ export class ProviderManager {
       this.qq.watcher.stop();
       this.qq = null;
     }
-    const pass = await keychainGet(kcQq(email));
+    const pass = await secretGet(kcQq(email));
     if (!pass) {
       this.qq?.watcher.stop();
       this.qq = null;
@@ -106,7 +106,7 @@ export class ProviderManager {
         this.outlookImap.watcher.stop();
         this.outlookImap = null;
       }
-      const pass = await keychainGet(kcOutlookImap(email));
+      const pass = await secretGet(kcOutlookImap(email));
       if (!pass) {
         this.outlookImap?.watcher.stop();
         this.outlookImap = null;
@@ -134,7 +134,7 @@ export class ProviderManager {
 
   async clearQq(): Promise<void> {
     const email = this.config.qq.email;
-    if (email) await keychainDelete(kcQq(email));
+    if (email) await secretDelete(kcQq(email));
     await this.updateConfig((c) => {
       c.qq.email = undefined;
     });
@@ -142,7 +142,7 @@ export class ProviderManager {
 
   async clearOutlookImap(): Promise<void> {
     const email = this.config.outlook.imapEmail;
-    if (email) await keychainDelete(kcOutlookImap(email));
+    if (email) await secretDelete(kcOutlookImap(email));
     await this.updateConfig((c) => {
       c.outlook.imapEmail = undefined;
     });
