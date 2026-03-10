@@ -15,6 +15,16 @@ function setAgentStatus(ok, detail) {
   setMsg("agentStatus", ok ? `OK · ${detail || ""}` : `DOWN · ${detail || ""}`);
 }
 
+function setSecretsVisible(visible) {
+  const type = visible ? "text" : "password";
+  for (const id of ["agentApiKey", "qqAuthCode", "outlookImapPass"]) {
+    const el = $(id);
+    if (!el) continue;
+    // Only toggle the types we control.
+    if (el.type === "password" || el.type === "text") el.type = type;
+  }
+}
+
 function originPatternFromBaseUrl(baseUrl) {
   try {
     const u = new URL(baseUrl);
@@ -50,27 +60,37 @@ async function loadExtSettings() {
 }
 
 async function saveExtSettings() {
+  setMsg("saveExtMsg", "Saving…");
   const agentBaseUrl = $("agentBaseUrl").value.trim() || "http://127.0.0.1:17373";
   const agentApiKey = $("agentApiKey").value.trim();
   const maxAgeSec = Math.max(10, Math.min(600, Number($("maxAgeSec").value || "120")));
-  await chrome.storage.local.set({ agentBaseUrl, agentApiKey, maxAgeSec });
 
   const origin = originPatternFromBaseUrl(agentBaseUrl);
+  let permGranted = true;
   // Localhost origin is already in host_permissions.
   if (origin && origin !== "http://127.0.0.1:17373/*") {
     try {
-      const granted = await chrome.permissions.request({ origins: [origin] });
-      if (!granted) {
-        setMsg("saveExtMsg", `Permission denied for ${origin}`);
-        return;
-      }
+      // IMPORTANT: permissions.request must be called in a user gesture. Keep it before other awaits.
+      permGranted = await chrome.permissions.request({ origins: [origin] });
     } catch {
-      // ignore
+      permGranted = false;
     }
   }
 
-  setMsg("saveExtMsg", "Saved.");
-  setTimeout(() => setMsg("saveExtMsg", ""), 1200);
+  try {
+    await chrome.storage.local.set({ agentBaseUrl, agentApiKey, maxAgeSec });
+  } catch (e) {
+    setMsg("saveExtMsg", `Failed to save: ${String(e && e.message ? e.message : e)}`);
+    return;
+  }
+
+  if (origin && origin !== "http://127.0.0.1:17373/*" && !permGranted) {
+    setMsg("saveExtMsg", `Saved. Permission not granted for ${origin} (agent will be unreachable).`);
+  } else {
+    setMsg("saveExtMsg", "Saved.");
+  }
+  setTimeout(() => setMsg("saveExtMsg", ""), 2500);
+  await refreshAgentStatus();
 }
 
 function renderOutlookMode(mode) {
@@ -89,7 +109,10 @@ async function refreshAgentStatus() {
   try {
     const r = await bg({ type: "BG_AGENT_STATUS" });
     if (!r || !r.ok) {
-      setAgentStatus(false, r && r.error ? r.error : "");
+      const err = r && r.error ? String(r.error) : "";
+      if (err === "unauthorized") setAgentStatus(false, "Need Agent API Key");
+      else if (err) setAgentStatus(false, err);
+      else setAgentStatus(false, "");
       return;
     }
 
@@ -135,6 +158,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   $("refreshStatus").addEventListener("click", refreshAgentStatus);
   $("saveExt").addEventListener("click", saveExtSettings);
+  $("showSecrets").addEventListener("change", () => {
+    setSecretsVisible($("showSecrets").checked);
+  });
 
   $("qqSave").addEventListener("click", async () => {
     setMsg("qqMsg", "Saving…");
@@ -143,7 +169,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       const authCode = $("qqAuthCode").value.trim();
       const r = await bg({ type: "BG_QQ_CONFIG", email, authCode });
       setMsg("qqMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
-      if (r && r.ok) await chrome.storage.local.set({ lastQqEmail: email });
+      if (r && r.ok) {
+        setMsg("qqState", "Configured");
+        await chrome.storage.local.set({ lastQqEmail: email });
+      }
       $("qqAuthCode").value = "";
       await refreshAgentStatus();
     } catch (e) {
@@ -174,7 +203,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       const clientId = $("outlookClientId").value.trim();
       const r = await bg({ type: "BG_OUTLOOK_CONFIG", payload: { mode: "oauth", clientId } });
       setMsg("outlookOauthMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
-      if (r && r.ok) await chrome.storage.local.set({ lastOutlookMode: "oauth", lastOutlookClientId: clientId });
+      if (r && r.ok) {
+        setMsg("outlookState", "OAuth not connected");
+        await chrome.storage.local.set({ lastOutlookMode: "oauth", lastOutlookClientId: clientId });
+      }
       await refreshAgentStatus();
     } catch (e) {
       setMsg("outlookOauthMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
@@ -231,7 +263,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         payload: { mode: "imap", email, appPassword }
       });
       setMsg("outlookImapMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
-      if (r && r.ok) await chrome.storage.local.set({ lastOutlookMode: "imap", lastOutlookImapEmail: email });
+      if (r && r.ok) {
+        setMsg("outlookState", "IMAP configured");
+        await chrome.storage.local.set({ lastOutlookMode: "imap", lastOutlookImapEmail: email });
+      }
       $("outlookImapPass").value = "";
       await refreshAgentStatus();
     } catch (e) {

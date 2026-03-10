@@ -88,9 +88,25 @@ select {
   outline: none;
 }
 
+input[type="checkbox"] {
+  width: auto;
+}
+
 label {
   display: block;
   margin: 10px 0 6px 0;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.check span {
   color: var(--muted);
 }
 
@@ -123,4 +139,3 @@ a {
 a:hover {
   text-decoration: underline;
 }
-

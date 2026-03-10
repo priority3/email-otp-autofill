@@ -13,7 +13,7 @@
       <div class="card">
         <div class="row">
           <div>
-            <div style="font-weight:600;">Local Agent</div>
+            <div style="font-weight:600;">Agent</div>
             <div id="agentStatus" class="muted" style="margin-top:6px;">Checking…</div>
           </div>
           <button id="refreshStatus">Refresh</button>
@@ -26,6 +26,10 @@
         <label for="agentApiKey">Agent API Key</label>
         <input id="agentApiKey" type="password" placeholder="(optional for localhost, required for public domain)" />
         <div class="hint">If the agent is exposed via a domain (Cloudflare Tunnel), set `OTP_AGENT_API_KEY` on the server and paste the same value here.</div>
+        <label class="check" style="margin-top:8px;">
+          <input id="showSecrets" type="checkbox" />
+          <span>Show secrets</span>
+        </label>
 
         <label for="maxAgeSec">Max OTP Age (seconds)</label>
         <input id="maxAgeSec" type="number" min="10" max="600" />
@@ -52,7 +56,7 @@
         <input id="qqEmail" placeholder="123456@qq.com" />
 
         <label for="qqAuthCode">QQ IMAP 授权码</label>
-        <input id="qqAuthCode" placeholder="授权码（不是QQ登录密码）" />
+        <input id="qqAuthCode" type="password" placeholder="授权码（不是QQ登录密码）" />
         <div class="hint">出于安全考虑，保存后不会回显授权码。</div>
 
         <div class="row" style="margin-top:12px;">
@@ -101,7 +105,7 @@
           <label for="outlookImapEmail">Outlook Email</label>
           <input id="outlookImapEmail" placeholder="you@outlook.com" />
           <label for="outlookImapPass">App Password</label>
-          <input id="outlookImapPass" placeholder="App password (recommended), or normal password if IMAP allows" />
+          <input id="outlookImapPass" type="password" placeholder="App password (recommended), or normal password if IMAP allows" />
           <div class="hint">出于安全考虑，保存后不会回显密码。</div>
           <div class="row" style="margin-top:12px;">
             <button id="outlookImapSave" class="primary">Save Outlook IMAP</button>
