@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Email OTP Autofill</title>
+    <style>
+      body { width: 340px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Email OTP Autofill</h1>
+      <div class="card">
+        <div class="row">
+          <div>
+            <div id="code" class="code">------</div>
+            <div id="meta" class="muted" style="margin-top:6px;">Waiting…</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <button id="fill" class="primary">Fill</button>
+            <button id="copy">Copy</button>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+        <div class="row">
+          <span id="agent" class="pill">Agent: ?</span>
+          <button id="settings">Settings</button>
+        </div>
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
+

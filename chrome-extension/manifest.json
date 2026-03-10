@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Email OTP Autofill (Local)",
+  "version": "0.1.0",
+  "description": "Fetch OTP codes from local agent (QQ Mail / Outlook) and fill into the current page.",
+  "permissions": ["storage", "activeTab", "tabs"],
+  "host_permissions": ["http://127.0.0.1:17373/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Email OTP Autofill",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "fill_otp": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Period",
+        "mac": "Command+Shift+Period"
+      },
+      "description": "Fill OTP from email"
+    }
+  }
+}
+

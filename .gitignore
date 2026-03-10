@@ -1,0 +1,9 @@
+.DS_Store
+
+# Agent
+/agent/node_modules/
+/agent/dist/
+
+# Extension (if you add build tooling later)
+/chrome-extension/dist/
+

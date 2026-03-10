@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Email OTP Autofill Settings</title>
+  </head>
+  <body>
+    <main>
+      <h1>Settings</h1>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <div style="font-weight:600;">Local Agent</div>
+            <div id="agentStatus" class="muted" style="margin-top:6px;">Checking…</div>
+          </div>
+          <button id="refreshStatus">Refresh</button>
+        </div>
+
+        <label for="agentBaseUrl">Agent Base URL</label>
+        <input id="agentBaseUrl" placeholder="http://127.0.0.1:17373" />
+        <div class="hint">Run the agent locally: <span class="code">cd /path/to/email-otp-autofill/agent && npm run dev</span></div>
+
+        <label for="maxAgeSec">Max OTP Age (seconds)</label>
+        <input id="maxAgeSec" type="number" min="10" max="600" />
+
+        <div class="row" style="margin-top:12px;">
+          <button id="saveExt" class="primary">Save Extension Settings</button>
+          <span id="saveExtMsg" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <div style="font-weight:600;">QQ Mail (IMAP)</div>
+            <div class="muted" style="margin-top:6px;">Uses your QQ IMAP授权码. Stored in macOS Keychain by the agent.</div>
+          </div>
+          <button id="qqClear" class="danger">Clear</button>
+        </div>
+
+        <label for="qqEmail">QQ Email</label>
+        <input id="qqEmail" placeholder="123456@qq.com" />
+
+        <label for="qqAuthCode">QQ IMAP 授权码</label>
+        <input id="qqAuthCode" placeholder="授权码（不是QQ登录密码）" />
+
+        <div class="row" style="margin-top:12px;">
+          <button id="qqSave" class="primary">Save QQ</button>
+          <span id="qqMsg" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="card">
+        <div class="row">
+          <div>
+            <div style="font-weight:600;">Outlook</div>
+            <div class="muted" style="margin-top:6px;">Choose OAuth (Graph) or IMAP mode.</div>
+          </div>
+          <button id="outlookClear" class="danger">Clear</button>
+        </div>
+
+        <label for="outlookMode">Mode</label>
+        <select id="outlookMode">
+          <option value="oauth">OAuth (Graph) (Recommended)</option>
+          <option value="imap">IMAP (App Password)</option>
+        </select>
+
+        <div id="outlookOauthBox">
+          <label for="outlookClientId">Microsoft App Client ID</label>
+          <input id="outlookClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <div class="hint">
+            You need a free App Registration that supports personal Microsoft accounts.
+            The agent uses Device Code flow, so no redirect URL needed.
+          </div>
+          <div class="row" style="margin-top:12px;">
+            <button id="outlookOauthSave" class="primary">Save Client ID</button>
+            <button id="outlookAuthStart">Start Sign-in</button>
+          </div>
+          <div class="hint" id="deviceCodeMsg"></div>
+          <div class="row" style="margin-top:8px;">
+            <button id="outlookAuthPoll">Poll</button>
+            <span id="outlookOauthMsg" class="muted"></span>
+          </div>
+        </div>
+
+        <div id="outlookImapBox" style="display:none;">
+          <label for="outlookImapEmail">Outlook Email</label>
+          <input id="outlookImapEmail" placeholder="you@outlook.com" />
+          <label for="outlookImapPass">App Password</label>
+          <input id="outlookImapPass" placeholder="App password (recommended), or normal password if IMAP allows" />
+          <div class="row" style="margin-top:12px;">
+            <button id="outlookImapSave" class="primary">Save Outlook IMAP</button>
+            <span id="outlookImapMsg" class="muted"></span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>
