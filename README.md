@@ -22,6 +22,34 @@ npm run dev
 
 Load the extension unpacked from `chrome-extension/` in Chrome (Developer Mode).
 
+## 使用方法 (Usage)
+
+### 1. 配置邮箱（在扩展的「设置」页）
+
+点击扩展图标 → `设置`（Settings）。顶部确认 `Agent` 状态为 **正常 / OK**（默认地址 `http://127.0.0.1:17373`）。
+
+- **QQ 邮箱（IMAP）**：登录 [QQ 邮箱网页版](https://mail.qq.com) → 设置 → 账号 → 开启「IMAP/SMTP 服务」→ 按提示短信验证 → 得到 **授权码**（不是登录密码）。把 QQ 邮箱和授权码填入设置页 → `保存 QQ`。
+- **Outlook（OAuth，推荐）**：在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) 新建注册（账户类型选「Personal Microsoft accounts only」，无需 Redirect URI，并在 Authentication 页把「Allow public client flows」设为 Yes）→ 复制 Application (client) ID 填入 → `保存 Client ID` → `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
+- **Outlook（IMAP）**：在设置页把模式切到 IMAP，填邮箱 + 应用专用密码 → `保存 Outlook IMAP`。
+
+> 已保存的授权码/密码下次打开设置页会以圆点（••••）回填，点字段右侧的**小眼睛**即可查看明文。
+
+### 2. 日常使用
+
+1. 在网页上点「发送验证码」，邮件到达后，扩展工具栏图标会出现**红色角标**提示有新验证码（每 ~30 秒检查一次）。
+2. **把光标点进网页的验证码输入框**，按快捷键填充：
+   - macOS：`⌘ + Shift + .`
+   - Windows/Linux：`Ctrl + Shift + .`
+
+   （快捷键可在 `chrome://extensions/shortcuts` 修改。）
+3. 或者点扩展图标，在弹窗里看到验证码后点 `填充` / `复制`。
+
+填充后角标自动清除；验证码默认只在到达后 **120 秒**内有效（可在设置页「验证码有效期」调整为 10–600 秒）。
+
+### 3. 界面语言
+
+popup 和设置页右上角有**中 / English 切换**，首次跟随浏览器语言，之后记住你的选择。
+
 ## Deploy Agent On A Server (Docker)
 
 This repo ships with a `docker-compose.yml` that can:
