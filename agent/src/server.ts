@@ -99,6 +99,23 @@ export async function startServer() {
     res.json({ ok: true });
   });
 
+  // Reveal a stored secret in plaintext so the options page can pre-fill it.
+  // Security: returns sensitive credentials. Already gated by the client header
+  // + optional API key middleware; intended for the local single-user setup.
+  app.post("/v1/secret/reveal", async (req, res) => {
+    const Body = z.object({ kind: z.enum(["qq", "outlook_imap"]) });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const cfg = mgr.config;
+    let value: string | null = null;
+    if (body.data.kind === "qq") {
+      if (cfg.qq.email) value = await secretGet(`qq:${cfg.qq.email}`);
+    } else if (cfg.outlook.imapEmail) {
+      value = await secretGet(`outlook_imap:${cfg.outlook.imapEmail}`);
+    }
+    res.json({ ok: true, value: value ?? null });
+  });
+
   // Outlook config (OAuth or IMAP)
   app.post("/v1/outlook/config", async (req, res) => {
     const Body = z.discriminatedUnion("mode", [

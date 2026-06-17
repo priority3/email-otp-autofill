@@ -8,34 +8,39 @@
   </head>
   <body>
     <main>
-      <h1>Settings</h1>
+      <div class="row">
+        <h1 data-i18n="settings_title">Settings</h1>
+        <select id="uiLang" aria-label="Language" style="width:auto;">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
 
       <div class="card">
         <div class="row">
           <div>
-            <div style="font-weight:600;">Agent</div>
-            <div id="agentStatus" class="muted" style="margin-top:6px;">Checking…</div>
+            <div style="font-weight:600;" data-i18n="agent">Agent</div>
+            <div id="agentStatus" class="muted" style="margin-top:6px;" data-i18n="agent_status_checking">Checking…</div>
           </div>
-          <button id="refreshStatus">Refresh</button>
+          <button id="refreshStatus" data-i18n="refresh">Refresh</button>
         </div>
 
-        <label for="agentBaseUrl">Agent Base URL</label>
+        <label for="agentBaseUrl" data-i18n="base_url">Agent Base URL</label>
         <input id="agentBaseUrl" placeholder="http://127.0.0.1:17373" />
-        <div class="hint">Run the agent locally: <span class="code">cd /path/to/email-otp-autofill/agent && npm run dev</span></div>
+        <div class="hint" id="baseUrlHint">Run the agent locally: <span class="code">cd /path/to/email-otp-autofill/agent && npm run dev</span></div>
 
-        <label for="agentApiKey">Agent API Key</label>
-        <input id="agentApiKey" type="password" placeholder="(optional for localhost, required for public domain)" />
-        <div class="hint">If the agent is exposed via a domain (Cloudflare Tunnel), set `OTP_AGENT_API_KEY` on the server and paste the same value here.</div>
-        <label class="check" style="margin-top:8px;">
-          <input id="showSecrets" type="checkbox" />
-          <span>Show secrets</span>
-        </label>
+        <label for="agentApiKey" data-i18n="api_key">Agent API Key</label>
+        <div class="pwd-wrap">
+          <input id="agentApiKey" type="password" data-i18n-ph="api_key_ph" placeholder="(optional for localhost, required for public domain)" />
+          <button type="button" class="pwd-toggle" data-toggle="agentApiKey" aria-label="Show password"></button>
+        </div>
+        <div class="hint" data-i18n="api_key_hint">If the agent is exposed via a domain (Cloudflare Tunnel), set `OTP_AGENT_API_KEY` on the server and paste the same value here.</div>
 
-        <label for="maxAgeSec">Max OTP Age (seconds)</label>
+        <label for="maxAgeSec" data-i18n="max_age">Max OTP Age (seconds)</label>
         <input id="maxAgeSec" type="number" min="10" max="600" />
 
         <div class="row" style="margin-top:12px;">
-          <button id="saveExt" class="primary">Save Extension Settings</button>
+          <button id="saveExt" class="primary" data-i18n="save_ext">Save Extension Settings</button>
           <span id="saveExtMsg" class="muted"></span>
         </div>
       </div>
@@ -45,22 +50,30 @@
       <div class="card">
         <div class="row">
           <div>
-            <div style="font-weight:600;">QQ Mail (IMAP)</div>
-            <div class="muted" style="margin-top:6px;">Uses your QQ IMAP授权码. Stored in macOS Keychain by the agent.</div>
+            <div style="font-weight:600;" data-i18n="qq_title">QQ Mail (IMAP)</div>
+            <div class="muted" style="margin-top:6px;" data-i18n="qq_desc">Uses your QQ IMAP授权码. Stored in macOS Keychain by the agent.</div>
           </div>
-          <span id="qqState" class="pill">Not configured</span>
-          <button id="qqClear" class="danger">Clear</button>
+          <span id="qqState" class="pill" data-i18n="not_configured">Not configured</span>
+          <button id="qqClear" class="danger" data-i18n="clear">Clear</button>
         </div>
 
-        <label for="qqEmail">QQ Email</label>
+        <label for="qqEmail" data-i18n="qq_email">QQ Email</label>
         <input id="qqEmail" placeholder="123456@qq.com" />
 
-        <label for="qqAuthCode">QQ IMAP 授权码</label>
-        <input id="qqAuthCode" type="password" placeholder="授权码（不是QQ登录密码）" />
-        <div class="hint">出于安全考虑，保存后不会回显授权码。</div>
+        <label for="qqAuthCode" data-i18n="qq_authcode">QQ IMAP 授权码</label>
+        <div class="pwd-wrap">
+          <input id="qqAuthCode" type="password" data-i18n-ph="qq_authcode_ph" placeholder="授权码（不是QQ登录密码）" />
+          <button type="button" class="pwd-toggle" data-toggle="qqAuthCode" aria-label="Show password"></button>
+        </div>
+        <div class="hint" data-i18n="qq_no_echo">出于安全考虑，保存后不会回显授权码。</div>
+        <div class="hint" id="qqHowto">
+          获取途径：登录 <a href="https://mail.qq.com" target="_blank" rel="noopener">QQ 邮箱网页版</a> →
+          设置 → 账号 → 找到「POP3/IMAP/SMTP 服务」→ 开启「IMAP/SMTP 服务」→
+          按提示用手机发送短信验证 → 生成的授权码填入此处。
+        </div>
 
         <div class="row" style="margin-top:12px;">
-          <button id="qqSave" class="primary">Save QQ</button>
+          <button id="qqSave" class="primary" data-i18n="save_qq">Save QQ</button>
           <span id="qqMsg" class="muted"></span>
         </div>
       </div>
@@ -70,51 +83,62 @@
       <div class="card">
         <div class="row">
           <div>
-            <div style="font-weight:600;">Outlook</div>
-            <div class="muted" style="margin-top:6px;">Choose OAuth (Graph) or IMAP mode.</div>
+            <div style="font-weight:600;" data-i18n="outlook_title">Outlook</div>
+            <div class="muted" style="margin-top:6px;" data-i18n="outlook_desc">Choose OAuth (Graph) or IMAP mode.</div>
           </div>
-          <span id="outlookState" class="pill">Not configured</span>
-          <button id="outlookClear" class="danger">Clear</button>
+          <span id="outlookState" class="pill" data-i18n="not_configured">Not configured</span>
+          <button id="outlookClear" class="danger" data-i18n="clear">Clear</button>
         </div>
 
-        <label for="outlookMode">Mode</label>
+        <label for="outlookMode" data-i18n="mode">Mode</label>
         <select id="outlookMode">
-          <option value="oauth">OAuth (Graph) (Recommended)</option>
-          <option value="imap">IMAP (App Password)</option>
+          <option value="oauth" data-i18n="mode_oauth">OAuth (Graph) (Recommended)</option>
+          <option value="imap" data-i18n="mode_imap">IMAP (App Password)</option>
         </select>
 
         <div id="outlookOauthBox">
-          <label for="outlookClientId">Microsoft App Client ID</label>
-          <input id="outlookClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-          <div class="hint">
+          <label for="outlookClientId" data-i18n="client_id">Microsoft App Client ID</label>
+          <input id="outlookClientId" data-i18n-ph="client_id_ph" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <div class="hint" data-i18n="client_id_hint">
             You need a free App Registration that supports personal Microsoft accounts.
             The agent uses Device Code flow, so no redirect URL needed.
           </div>
+          <div class="hint" id="clientIdHowto">
+            获取途径：打开
+            <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">Azure 门户 · 应用注册</a>
+            → New registration → Supported account types 选「Personal Microsoft accounts only」→
+            无需填 Redirect URI → 注册后复制「Application (client) ID」填入此处。
+            还需在该应用的 Authentication 页把「Allow public client flows」设为 Yes（设备码流程要求）。
+          </div>
           <div class="row" style="margin-top:12px;">
-            <button id="outlookOauthSave" class="primary">Save Client ID</button>
-            <button id="outlookAuthStart">Start Sign-in</button>
+            <button id="outlookOauthSave" class="primary" data-i18n="save_client_id">Save Client ID</button>
+            <button id="outlookAuthStart" data-i18n="start_signin">Start Sign-in</button>
           </div>
           <div class="hint" id="deviceCodeMsg"></div>
           <div class="row" style="margin-top:8px;">
-            <button id="outlookAuthPoll">Poll</button>
+            <button id="outlookAuthPoll" data-i18n="poll">Poll</button>
             <span id="outlookOauthMsg" class="muted"></span>
           </div>
         </div>
 
         <div id="outlookImapBox" style="display:none;">
-          <label for="outlookImapEmail">Outlook Email</label>
+          <label for="outlookImapEmail" data-i18n="outlook_email">Outlook Email</label>
           <input id="outlookImapEmail" placeholder="you@outlook.com" />
-          <label for="outlookImapPass">App Password</label>
-          <input id="outlookImapPass" type="password" placeholder="App password (recommended), or normal password if IMAP allows" />
-          <div class="hint">出于安全考虑，保存后不会回显密码。</div>
+          <label for="outlookImapPass" data-i18n="app_password">App Password</label>
+          <div class="pwd-wrap">
+            <input id="outlookImapPass" type="password" data-i18n-ph="app_password_ph" placeholder="App password (recommended), or normal password if IMAP allows" />
+            <button type="button" class="pwd-toggle" data-toggle="outlookImapPass" aria-label="Show password"></button>
+          </div>
+          <div class="hint" data-i18n="imap_no_echo">出于安全考虑，保存后不会回显密码。</div>
           <div class="row" style="margin-top:12px;">
-            <button id="outlookImapSave" class="primary">Save Outlook IMAP</button>
+            <button id="outlookImapSave" class="primary" data-i18n="save_outlook_imap">Save Outlook IMAP</button>
             <span id="outlookImapMsg" class="muted"></span>
           </div>
         </div>
       </div>
     </main>
 
+    <script src="i18n.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

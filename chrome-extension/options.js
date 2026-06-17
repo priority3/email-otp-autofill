@@ -1,3 +1,9 @@
+const { t, getUiLang, setUiLang, applyStaticI18n } = globalThis.OtpI18n;
+
+let LANG = "en";
+// Shorthand: translate with the current language.
+const T = (key, vars) => t(LANG, key, vars);
+
 function $(id) {
   return document.getElementById(id);
 }
@@ -12,17 +18,60 @@ function setMsg(id, text) {
 }
 
 function setAgentStatus(ok, detail) {
-  setMsg("agentStatus", ok ? `OK · ${detail || ""}` : `DOWN · ${detail || ""}`);
+  setMsg("agentStatus", T(ok ? "agent_ok_detail" : "agent_down_detail", { detail: detail || "" }));
 }
 
-function setSecretsVisible(visible) {
-  const type = visible ? "text" : "password";
-  for (const id of ["agentApiKey", "qqAuthCode", "outlookImapPass"]) {
+// Eye icons for the per-field password visibility toggle (feather-style SVG,
+// stroke=currentColor so they inherit the muted/hover color from CSS).
+const EYE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+function setPwdVisible(input, btn, visible) {
+  input.type = visible ? "text" : "password";
+  // Show the "eye-off" icon while visible (clicking it hides again), and vice versa.
+  btn.innerHTML = visible ? EYE_OFF_ICON : EYE_ICON;
+  btn.setAttribute("aria-label", T(visible ? "hide_password" : "show_password"));
+}
+
+// Wire up every .pwd-toggle button to its input (via data-toggle="<inputId>").
+function initPwdToggles() {
+  document.querySelectorAll(".pwd-toggle").forEach((btn) => {
+    const input = $(btn.getAttribute("data-toggle"));
+    if (!input) return;
+    setPwdVisible(input, btn, false);
+    btn.addEventListener("click", () => {
+      setPwdVisible(input, btn, input.type === "password");
+    });
+  });
+}
+
+// Refresh the toggle aria-labels after a language switch (icons stay as-is).
+function refreshPwdToggleLabels() {
+  document.querySelectorAll(".pwd-toggle").forEach((btn) => {
+    const input = $(btn.getAttribute("data-toggle"));
+    if (!input) return;
+    btn.setAttribute("aria-label", T(input.type === "text" ? "hide_password" : "show_password"));
+  });
+}
+
+// Rich-text hints (contain HTML) are set here, not via applyStaticI18n.
+function applyRichI18n() {
+  const map = { baseUrlHint: "base_url_hint", qqHowto: "qq_howto", clientIdHowto: "client_id_howto" };
+  for (const id of Object.keys(map)) {
     const el = $(id);
-    if (!el) continue;
-    // Only toggle the types we control.
-    if (el.type === "password" || el.type === "text") el.type = type;
+    if (el) el.innerHTML = T(map[id]);
   }
+}
+
+function applyLang(lang) {
+  LANG = lang;
+  applyStaticI18n(document, LANG);
+  applyRichI18n();
+  refreshPwdToggleLabels();
+  const sel = $("uiLang");
+  if (sel) sel.value = LANG;
 }
 
 function originPatternFromBaseUrl(baseUrl) {
@@ -60,7 +109,7 @@ async function loadExtSettings() {
 }
 
 async function saveExtSettings() {
-  setMsg("saveExtMsg", "Saving…");
+  setMsg("saveExtMsg", T("saving"));
   const agentBaseUrl = $("agentBaseUrl").value.trim() || "http://127.0.0.1:17373";
   const agentApiKey = $("agentApiKey").value.trim();
   const maxAgeSec = Math.max(10, Math.min(600, Number($("maxAgeSec").value || "120")));
@@ -80,14 +129,14 @@ async function saveExtSettings() {
   try {
     await chrome.storage.local.set({ agentBaseUrl, agentApiKey, maxAgeSec });
   } catch (e) {
-    setMsg("saveExtMsg", `Failed to save: ${String(e && e.message ? e.message : e)}`);
+    setMsg("saveExtMsg", T("save_failed_with", { err: String(e && e.message ? e.message : e) }));
     return;
   }
 
   if (origin && origin !== "http://127.0.0.1:17373/*" && !permGranted) {
-    setMsg("saveExtMsg", `Saved. Permission not granted for ${origin} (agent will be unreachable).`);
+    setMsg("saveExtMsg", T("perm_not_granted", { origin }));
   } else {
-    setMsg("saveExtMsg", "Saved.");
+    setMsg("saveExtMsg", T("saved"));
   }
   setTimeout(() => setMsg("saveExtMsg", ""), 2500);
   await refreshAgentStatus();
@@ -110,7 +159,7 @@ async function refreshAgentStatus() {
     const r = await bg({ type: "BG_AGENT_STATUS" });
     if (!r || !r.ok) {
       const err = r && r.error ? String(r.error) : "";
-      if (err === "unauthorized") setAgentStatus(false, "Need Agent API Key");
+      if (err === "unauthorized") setAgentStatus(false, T("need_api_key"));
       else if (err) setAgentStatus(false, err);
       else setAgentStatus(false, "");
       return;
@@ -125,7 +174,7 @@ async function refreshAgentStatus() {
         $("qqEmail").value = cfg.qq.email;
         cache.lastQqEmail = cfg.qq.email;
       }
-      setMsg("qqState", cfg.qq.configured ? "Configured" : "Not configured");
+      setMsg("qqState", T(cfg.qq.configured ? "configured" : "not_configured"));
     }
 
     if (cfg.outlook) {
@@ -138,9 +187,9 @@ async function refreshAgentStatus() {
       if (cfg.outlook.imapEmail) cache.lastOutlookImapEmail = cfg.outlook.imapEmail;
 
       if ($("outlookMode").value === "oauth") {
-        setMsg("outlookState", cfg.outlook.oauthConnected ? "OAuth connected" : "OAuth not connected");
+        setMsg("outlookState", T(cfg.outlook.oauthConnected ? "oauth_connected" : "oauth_not_connected"));
       } else {
-        setMsg("outlookState", cfg.outlook.imapConfigured ? "IMAP configured" : "IMAP not configured");
+        setMsg("outlookState", T(cfg.outlook.imapConfigured ? "imap_configured" : "imap_not_configured"));
       }
     }
 
@@ -150,45 +199,67 @@ async function refreshAgentStatus() {
   }
 }
 
+// Pre-fill stored credentials (masked as dots) so the user can see/copy them
+// via the eye toggle. Values come from the agent's reveal endpoint.
+async function revealStoredSecrets() {
+  for (const [kind, inputId] of [["qq", "qqAuthCode"], ["outlook_imap", "outlookImapPass"]]) {
+    try {
+      const r = await bg({ type: "BG_REVEAL_SECRET", kind });
+      if (r && r.ok && r.value) $(inputId).value = r.value;
+    } catch {
+      // ignore — agent down or secret not set
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  LANG = await getUiLang();
+  applyLang(LANG);
+
   await loadExtSettings();
   await loadLastConfig();
   renderOutlookMode($("outlookMode").value);
   await refreshAgentStatus();
+  await revealStoredSecrets();
+
+  $("uiLang").addEventListener("change", async () => {
+    const lang = $("uiLang").value;
+    await setUiLang(lang);
+    applyLang(lang);
+    // Reason: re-render dynamic status strings in the new language.
+    await refreshAgentStatus();
+  });
 
   $("refreshStatus").addEventListener("click", refreshAgentStatus);
   $("saveExt").addEventListener("click", saveExtSettings);
-  $("showSecrets").addEventListener("change", () => {
-    setSecretsVisible($("showSecrets").checked);
-  });
+  initPwdToggles();
 
   $("qqSave").addEventListener("click", async () => {
-    setMsg("qqMsg", "Saving…");
+    setMsg("qqMsg", T("saving"));
     try {
       const email = $("qqEmail").value.trim();
       const authCode = $("qqAuthCode").value.trim();
       const r = await bg({ type: "BG_QQ_CONFIG", email, authCode });
-      setMsg("qqMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
+      setMsg("qqMsg", r && r.ok ? T("saved") : T("failed_with", { err: r && r.error ? r.error : "" }));
       if (r && r.ok) {
-        setMsg("qqState", "Configured");
+        setMsg("qqState", T("configured"));
         await chrome.storage.local.set({ lastQqEmail: email });
       }
-      $("qqAuthCode").value = "";
       await refreshAgentStatus();
     } catch (e) {
-      setMsg("qqMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
+      setMsg("qqMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
     setTimeout(() => setMsg("qqMsg", ""), 2500);
   });
 
   $("qqClear").addEventListener("click", async () => {
-    setMsg("qqMsg", "Clearing…");
+    setMsg("qqMsg", T("clearing"));
     try {
       const r = await bg({ type: "BG_QQ_CLEAR" });
-      setMsg("qqMsg", r && r.ok ? "Cleared." : "Failed.");
+      setMsg("qqMsg", r && r.ok ? T("cleared") : T("failed"));
       await refreshAgentStatus();
     } catch (e) {
-      setMsg("qqMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
+      setMsg("qqMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
     setTimeout(() => setMsg("qqMsg", ""), 2500);
   });
@@ -198,63 +269,63 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   $("outlookOauthSave").addEventListener("click", async () => {
-    setMsg("outlookOauthMsg", "Saving…");
+    setMsg("outlookOauthMsg", T("saving"));
     try {
       const clientId = $("outlookClientId").value.trim();
       const r = await bg({ type: "BG_OUTLOOK_CONFIG", payload: { mode: "oauth", clientId } });
-      setMsg("outlookOauthMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
+      setMsg("outlookOauthMsg", r && r.ok ? T("saved") : T("failed_with", { err: r && r.error ? r.error : "" }));
       if (r && r.ok) {
-        setMsg("outlookState", "OAuth not connected");
+        setMsg("outlookState", T("oauth_not_connected"));
         await chrome.storage.local.set({ lastOutlookMode: "oauth", lastOutlookClientId: clientId });
       }
       await refreshAgentStatus();
     } catch (e) {
-      setMsg("outlookOauthMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
+      setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
     setTimeout(() => setMsg("outlookOauthMsg", ""), 2500);
   });
 
   $("outlookAuthStart").addEventListener("click", async () => {
-    setMsg("deviceCodeMsg", "Starting…");
+    setMsg("deviceCodeMsg", T("starting"));
     try {
       const r = await bg({ type: "BG_OUTLOOK_AUTH_START" });
       if (!r || !r.ok) {
-        setMsg("deviceCodeMsg", `Failed: ${r && r.error ? r.error : ""}`);
+        setMsg("deviceCodeMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
         return;
       }
       const dc = r.deviceCode;
       const link = dc.verification_uri_complete || dc.verification_uri;
       setMsg(
         "deviceCodeMsg",
-        `Open ${dc.verification_uri} and enter code ${dc.user_code} (expires in ${dc.expires_in}s).`
+        T("device_code_msg", { uri: dc.verification_uri, code: dc.user_code, sec: dc.expires_in })
       );
       if (link) chrome.tabs.create({ url: link });
     } catch (e) {
-      setMsg("deviceCodeMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
+      setMsg("deviceCodeMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
   });
 
   $("outlookAuthPoll").addEventListener("click", async () => {
-    setMsg("outlookOauthMsg", "Polling…");
+    setMsg("outlookOauthMsg", T("polling"));
     try {
       const r = await bg({ type: "BG_OUTLOOK_AUTH_POLL" });
       if (!r || !r.ok) {
-        setMsg("outlookOauthMsg", `Failed: ${r && r.error ? r.error : ""}`);
+        setMsg("outlookOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
         return;
       }
       const result = r.result;
-      if (result.status === "success") setMsg("outlookOauthMsg", "Connected.");
-      else if (result.status === "expired") setMsg("outlookOauthMsg", "Expired. Start again.");
-      else setMsg("outlookOauthMsg", `Pending (${result.error || "authorization_pending"})`);
+      if (result.status === "success") setMsg("outlookOauthMsg", T("connected"));
+      else if (result.status === "expired") setMsg("outlookOauthMsg", T("expired"));
+      else setMsg("outlookOauthMsg", T("pending", { err: result.error || "authorization_pending" }));
       await refreshAgentStatus();
     } catch (e) {
-      setMsg("outlookOauthMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
+      setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
     setTimeout(() => setMsg("outlookOauthMsg", ""), 3500);
   });
 
   $("outlookImapSave").addEventListener("click", async () => {
-    setMsg("outlookImapMsg", "Saving…");
+    setMsg("outlookImapMsg", T("saving"));
     try {
       const email = $("outlookImapEmail").value.trim();
       const appPassword = $("outlookImapPass").value.trim();
@@ -262,30 +333,29 @@ document.addEventListener("DOMContentLoaded", async () => {
         type: "BG_OUTLOOK_CONFIG",
         payload: { mode: "imap", email, appPassword }
       });
-      setMsg("outlookImapMsg", r && r.ok ? "Saved." : `Failed: ${r && r.error ? r.error : ""}`);
+      setMsg("outlookImapMsg", r && r.ok ? T("saved") : T("failed_with", { err: r && r.error ? r.error : "" }));
       if (r && r.ok) {
-        setMsg("outlookState", "IMAP configured");
+        setMsg("outlookState", T("imap_configured"));
         await chrome.storage.local.set({ lastOutlookMode: "imap", lastOutlookImapEmail: email });
       }
-      $("outlookImapPass").value = "";
       await refreshAgentStatus();
     } catch (e) {
-      setMsg("outlookImapMsg", `Failed: ${String(e && e.message ? e.message : e)}`);
+      setMsg("outlookImapMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
     setTimeout(() => setMsg("outlookImapMsg", ""), 2500);
   });
 
   $("outlookClear").addEventListener("click", async () => {
-    setMsg("outlookImapMsg", "Clearing…");
-    setMsg("outlookOauthMsg", "Clearing…");
+    setMsg("outlookImapMsg", T("clearing"));
+    setMsg("outlookOauthMsg", T("clearing"));
     try {
       const r = await bg({ type: "BG_OUTLOOK_CLEAR" });
-      const msg = r && r.ok ? "Cleared." : `Failed: ${r && r.error ? r.error : ""}`;
+      const msg = r && r.ok ? T("cleared") : T("failed_with", { err: r && r.error ? r.error : "" });
       setMsg("outlookImapMsg", msg);
       setMsg("outlookOauthMsg", msg);
       await refreshAgentStatus();
     } catch (e) {
-      const msg = `Failed: ${String(e && e.message ? e.message : e)}`;
+      const msg = T("failed_with", { err: String(e && e.message ? e.message : e) });
       setMsg("outlookImapMsg", msg);
       setMsg("outlookOauthMsg", msg);
     }

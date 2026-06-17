@@ -98,6 +98,40 @@ label {
   color: var(--muted);
 }
 
+.pwd-wrap {
+  position: relative;
+}
+
+.pwd-wrap input {
+  padding-right: 38px;
+}
+
+.pwd-toggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+.pwd-toggle:hover {
+  color: var(--text);
+}
+
+.pwd-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
 .check {
   display: flex;
   gap: 8px;

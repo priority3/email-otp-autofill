@@ -3,7 +3,7 @@
   "name": "Email OTP Autofill",
   "version": "0.1.1",
   "description": "Fetch OTP codes from an agent (QQ Mail / Outlook) and fill into the current page.",
-  "permissions": ["storage", "activeTab", "tabs"],
+  "permissions": ["storage", "activeTab", "tabs", "alarms"],
   "host_permissions": ["http://127.0.0.1:17373/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {

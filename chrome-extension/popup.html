@@ -11,26 +11,33 @@
   </head>
   <body>
     <main>
-      <h1>Email OTP Autofill</h1>
+      <div class="row">
+        <h1 data-i18n="app_title">Email OTP Autofill</h1>
+        <select id="uiLang" aria-label="Language" style="width:auto;">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
       <div class="card">
         <div class="row">
           <div>
             <div id="code" class="code">------</div>
-            <div id="meta" class="muted" style="margin-top:6px;">Waiting…</div>
+            <div id="meta" class="muted" style="margin-top:6px;" data-i18n="waiting">Waiting…</div>
           </div>
           <div style="display:flex; flex-direction:column; gap:8px;">
-            <button id="fill" class="primary">Fill</button>
-            <button id="copy">Copy</button>
+            <button id="fill" class="primary" data-i18n="fill">Fill</button>
+            <button id="copy" data-i18n="copy">Copy</button>
           </div>
         </div>
 
         <div class="hr"></div>
         <div class="row">
           <span id="agent" class="pill">Agent: ?</span>
-          <button id="settings">Settings</button>
+          <button id="settings" data-i18n="settings">Settings</button>
         </div>
       </div>
     </main>
+    <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

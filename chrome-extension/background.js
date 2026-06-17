@@ -1,3 +1,13 @@
+importScripts("i18n.js");
+const { t, getUiLang } = globalThis.OtpI18n;
+
+// Map a content-script fill error code to a localized toast message.
+function translateFillError(lang, code) {
+  if (code === "no_otp_field" || code === "err_no_otp_field") return t(lang, "err_no_otp_field");
+  if (code === "invalid_code" || code === "err_invalid_code") return t(lang, "err_invalid_code");
+  return t(lang, "toast_fill_failed");
+}
+
 const CLIENT_HEADER_NAME = "x-otp-agent-client";
 const CLIENT_HEADER_VALUE = "email-otp-autofill";
 const API_KEY_HEADER_NAME = "x-otp-agent-key";
@@ -57,13 +67,78 @@ async function consumeOtp(id) {
   await agentFetch("/v1/otp/consume", { method: "POST", body: JSON.stringify({ id }) });
 }
 
+// --- New-OTP badge on the toolbar icon -------------------------------------
+
+const POLL_ALARM = "otp-poll";
+const BADGE_COLOR = "#e53935";
+
+async function setUnreadBadge(count) {
+  if (!chrome.action || !chrome.action.setBadgeText) return;
+  await chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
+  if (count > 0) {
+    await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+    // setBadgeTextColor is not available on all Chrome versions.
+    if (chrome.action.setBadgeTextColor) {
+      await chrome.action.setBadgeTextColor({ color: "#ffffff" });
+    }
+  }
+}
+
+// Poll the agent for OTPs newer than the last time the user looked, and badge
+// the toolbar icon with the unread count. Silent on failure (agent down/unset).
+async function pollForNewOtp() {
+  try {
+    const json = await agentFetch("/v1/otp/list", { method: "GET" });
+    const items = (json && json.items) || [];
+    const { lastSeenOtpTs = 0 } = await chrome.storage.local.get(["lastSeenOtpTs"]);
+    // Reason: an OTP is "new" if it arrived after the user last viewed/filled
+    // and has not been consumed yet.
+    const unread = items.filter(
+      (it) => it && !it.consumedAt && Number(it.receivedAt) > lastSeenOtpTs
+    );
+    await setUnreadBadge(unread.length);
+  } catch {
+    // Agent unreachable or not configured — leave the badge untouched.
+  }
+}
+
+// Mark everything currently in the store as seen and clear the badge.
+async function markAllOtpSeen() {
+  await chrome.storage.local.set({ lastSeenOtpTs: Date.now() });
+  await setUnreadBadge(0);
+}
+
+function ensurePollAlarm() {
+  // 0.5 min is the practical floor for an unpacked extension; OTPs are
+  // short-lived, so notice them well before they expire.
+  chrome.alarms.create(POLL_ALARM, { periodInMinutes: 0.5 });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  ensurePollAlarm();
+  pollForNewOtp();
+});
+chrome.runtime.onStartup.addListener(() => {
+  ensurePollAlarm();
+  pollForNewOtp();
+});
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === POLL_ALARM) pollForNewOtp();
+});
+
+// Also run once whenever the service worker spins up.
+ensurePollAlarm();
+pollForNewOtp();
+
 async function fillOnActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) return { ok: false, error: "no_active_tab" };
 
+  const lang = await getUiLang();
+
   const otp = await fetchLatestOtpForTab(tab.url || "");
   if (!otp || !otp.code) {
-    await chrome.tabs.sendMessage(tab.id, { type: "OTP_TOAST", level: "info", message: "No recent OTP found." });
+    await chrome.tabs.sendMessage(tab.id, { type: "OTP_TOAST", level: "info", message: t(lang, "toast_no_otp") });
     return { ok: false, error: "no_otp" };
   }
 
@@ -77,13 +152,14 @@ async function fillOnActiveTab() {
         // ignore consume errors
       }
     }
+    await markAllOtpSeen();
     return { ok: true };
   }
 
   await chrome.tabs.sendMessage(tab.id, {
     type: "OTP_TOAST",
     level: "error",
-    message: (result && result.error) ? String(result.error) : "Failed to fill OTP."
+    message: translateFillError(lang, result && result.error ? String(result.error) : "")
   });
   return { ok: false, error: (result && result.error) ? String(result.error) : "fill_failed" };
 }
@@ -101,6 +177,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "BG_FETCH_LATEST") {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const otp = await fetchLatestOtpForTab((tab && tab.url) || "");
+      // Opening the popup counts as seeing the latest codes — clear the badge.
+      await markAllOtpSeen();
       sendResponse({ ok: true, otp });
       return;
     }
@@ -130,6 +208,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "BG_QQ_CLEAR") {
       const json = await agentFetch("/v1/qq/clear", { method: "POST", body: JSON.stringify({}) });
       sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    if (msg.type === "BG_REVEAL_SECRET") {
+      const json = await agentFetch("/v1/secret/reveal", {
+        method: "POST",
+        body: JSON.stringify({ kind: msg.kind })
+      });
+      sendResponse({ ok: true, value: json.value });
       return;
     }
 
