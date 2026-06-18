@@ -229,10 +229,9 @@ const DEFAULT_BASE_URL = "https://otp.razet.me";
 const PRE_GRANTED_ORIGINS = new Set(["https://otp.razet.me/*", "http://127.0.0.1:17373/*"]);
 
 async function loadExtSettings() {
-  const raw = await chrome.storage.local.get(["agentBaseUrl", "agentApiKey", "maxAgeSec"]);
-  // Connection fields live in the login panel (editable only before login).
+  const raw = await chrome.storage.local.get(["agentBaseUrl", "maxAgeSec"]);
+  // Connection field lives in the login panel (editable only before login).
   $("loginBaseUrl").value = raw.agentBaseUrl || DEFAULT_BASE_URL;
-  $("loginApiKey").value = raw.agentApiKey || "";
   $("maxAgeSec").value = String(Number.isFinite(raw.maxAgeSec) ? raw.maxAgeSec : 120);
 }
 
@@ -256,7 +255,6 @@ async function saveExtSettings() {
 async function saveConnection() {
   setMsg("loginConnMsg", T("saving"));
   const agentBaseUrl = $("loginBaseUrl").value.trim() || DEFAULT_BASE_URL;
-  const agentApiKey = $("loginApiKey").value.trim();
 
   const origin = originPatternFromBaseUrl(agentBaseUrl);
   let permGranted = true;
@@ -270,7 +268,9 @@ async function saveConnection() {
   }
 
   try {
-    await chrome.storage.local.set({ agentBaseUrl, agentApiKey });
+    // Drop any legacy API key — public instances authenticate by login only.
+    await chrome.storage.local.set({ agentBaseUrl });
+    await chrome.storage.local.remove("agentApiKey");
   } catch (e) {
     setMsg("loginConnMsg", T("save_failed_with", { err: String(e && e.message ? e.message : e) }));
     return;
