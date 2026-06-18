@@ -113,10 +113,15 @@ async function markAllOtpSeen() {
   await setUnreadBadge(0);
 }
 
+// Fast foreground polling: while the service worker is alive, check every 5s.
+// The recurring timer also keeps the SW awake, so this approximates a real 5s
+// poll. Chrome floors chrome.alarms at ~1 min, so the alarm below is only a
+// fallback wakeup in case the SW is terminated.
+const POLL_INTERVAL_MS = 5000;
+
 function ensurePollAlarm() {
-  // 0.5 min is the practical floor for an unpacked extension; OTPs are
-  // short-lived, so notice them well before they expire.
-  chrome.alarms.create(POLL_ALARM, { periodInMinutes: 0.5 });
+  // Fallback wakeup only — Chrome clamps alarm periods to a 1-minute minimum.
+  chrome.alarms.create(POLL_ALARM, { periodInMinutes: 1 });
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -131,9 +136,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM) pollForNewOtp();
 });
 
-// Also run once whenever the service worker spins up.
+// Run once on spin-up, then every 5s while this service worker stays alive.
 ensurePollAlarm();
 pollForNewOtp();
+setInterval(() => {
+  pollForNewOtp().catch(() => {});
+}, POLL_INTERVAL_MS);
 
 async function fillOnActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
