@@ -287,6 +287,7 @@ async function saveConnection() {
 
 // ---- multi-tenant auth gating --------------------------------------------
 let authMode = "login"; // "login" | "register"
+let bootSelected = false; // whether the default detail panel was chosen once
 
 // Toggle the login panel vs the settings UI based on the agent status payload.
 // Returns true if the settings UI should be shown (single-tenant, or logged in).
@@ -375,6 +376,13 @@ async function refreshStatus() {
     const authed = applyAuthState(r.status);
     if (!authed) return; // login panel is up; nothing else to render
     if (r.status.multiTenant) loadMe();
+
+    // Pick a default panel once, only after we know the user is authed — avoids
+    // flashing the settings UI before the auth state is known.
+    if (!bootSelected) {
+      bootSelected = true;
+      selectAgent();
+    }
 
     setAgentStatus(true, `${r.status.agent.host}:${r.status.agent.port}`);
     const cfg = r.status.config || {};
@@ -563,6 +571,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   wireOauth();
   initPwdToggles();
 
-  // Default view: Agent settings.
-  selectAgent();
+  // Note: the default detail panel is selected inside refreshStatus() only after
+  // auth is confirmed, to avoid flashing the settings UI before login.
 });
