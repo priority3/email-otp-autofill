@@ -16,18 +16,6 @@ services:
     volumes:
       - ./data:/data
     ports:
-      # Bind to localhost only. Use SSH port-forwarding from your laptop for the Chrome extension.
+      # Bind to localhost only. Exposing it publicly (e.g. a Cloudflare Tunnel
+      # or reverse proxy) is the server's own concern, not this project's.
       - "127.0.0.1:17373:17373"
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: email-otp-autofill-cloudflared
-    restart: unless-stopped
-    profiles:
-      - cloudflare
-    depends_on:
-      - agent
-    environment:
-      # Put this in a local .env (do not commit). You can fetch it from Cloudflare API as TUNNEL_TOKEN.
-      TUNNEL_TOKEN: ${CF_TUNNEL_TOKEN:-}
-    command: tunnel --no-autoupdate run

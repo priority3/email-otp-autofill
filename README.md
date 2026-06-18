@@ -126,22 +126,20 @@ docker compose up -d --build
 
 ### Exposing it publicly
 
-- **Cloudflare Tunnel (recommended)** — create a Tunnel routing to
-  `http://agent:17373` (so it resolves inside Compose), put the run token in
-  `.env` as `CF_TUNNEL_TOKEN`, and start with the profile:
+The agent binds to `127.0.0.1:17373` on the server. How you expose it to the
+internet is **your server's concern, not this project's** — point your existing
+reverse proxy or tunnel at `127.0.0.1:17373`. Common options:
 
-  ```bash
-  docker compose --profile cloudflare up -d --build
-  ```
-
-  Then set the extension's **Agent Base URL** to `https://your.domain.tld`.
-
-- **SSH port-forward (fallback)** — the agent binds to `127.0.0.1:17373` on the
-  server; from your laptop:
+- **Cloudflare Tunnel** — run a `cloudflared` connector (separately from this
+  project) with an ingress rule routing `your.domain.tld → http://127.0.0.1:17373`.
+- **Reverse proxy** (nginx / Caddy) terminating TLS in front of `127.0.0.1:17373`.
+- **SSH port-forward** for quick testing:
 
   ```bash
   ssh -N -L 17373:127.0.0.1:17373 root@YOUR_SERVER_IP
   ```
+
+Then set the extension's **Agent Base URL** to your public address.
 
 > ⚠️ **Keep `OTP_AGENT_MASTER_KEY` safe and stable.** It decrypts your stored
 > email credentials. Lose it and every mailbox must be re-entered; change it and
