@@ -342,10 +342,43 @@ function setAuthMode(mode) {
   setMsg("authMsg", "");
 }
 
+// Clear previous validation state on the auth inputs.
+function clearAuthErrors() {
+  for (const id of ["authUser", "authPass", "authInvite"]) {
+    const el = $(id);
+    if (el) el.classList.remove("input-error");
+  }
+  const msg = $("authMsg");
+  if (msg) msg.classList.remove("msg-error");
+}
+
+// Flag one field as invalid: red border, focus it, show the message in red.
+function authError(inputId, key) {
+  const el = $(inputId);
+  if (el) {
+    el.classList.add("input-error");
+    el.focus();
+  }
+  const msg = $("authMsg");
+  if (msg) msg.classList.add("msg-error");
+  setMsg("authMsg", T(key));
+}
+
 async function submitAuth() {
+  clearAuthErrors();
   const username = $("authUser").value.trim();
   const password = $("authPass").value;
-  if (!username || !password) return;
+  const isReg = authMode === "register";
+
+  // Client-side validation with clear, field-specific messages (mirrors the
+  // backend rules: username >= 3, password >= 8).
+  if (!username) return authError("authUser", "err_username_required");
+  if (isReg && username.length < 3) return authError("authUser", "err_username_short");
+  if (!password) return authError("authPass", "err_password_required");
+  if (isReg && password.length < 8) return authError("authPass", "err_password_short");
+  if (isReg && requireInvite && !$("authInvite").value.trim())
+    return authError("authInvite", "err_invite_required");
+
   setMsg("authMsg", T("saving"));
   try {
     const type = authMode === "register" ? "BG_AUTH_REGISTER" : "BG_AUTH_LOGIN";
@@ -358,8 +391,18 @@ async function submitAuth() {
       await refreshStatus();
     } else {
       const err = (r && r.error) || "";
-      // Friendlier message for the common invite-code rejection.
-      setMsg("authMsg", err === "invalid_invite" ? T("invalid_invite") : T("auth_failed", { err }));
+      const m = $("authMsg");
+      if (m) m.classList.add("msg-error");
+      // Friendlier, field-aware messages for the common rejections.
+      if (err === "invalid_invite") {
+        $("authInvite") && $("authInvite").classList.add("input-error");
+        setMsg("authMsg", T("invalid_invite"));
+      } else if (err === "username_taken") {
+        $("authUser") && $("authUser").classList.add("input-error");
+        setMsg("authMsg", T("auth_failed", { err }));
+      } else {
+        setMsg("authMsg", T("auth_failed", { err }));
+      }
     }
   } catch (e) {
     setMsg("authMsg", T("auth_failed", { err: String(e && e.message ? e.message : e) }));
@@ -579,10 +622,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("authToggle").addEventListener("click", (e) => {
     e.preventDefault();
+    clearAuthErrors();
     setAuthMode(authMode === "login" ? "register" : "login");
   });
   $("logoutBtn").addEventListener("click", doLogout);
   $("loginSaveConn").addEventListener("click", saveConnection);
+  // Clear a field's error state as soon as the user edits it.
+  for (const id of ["authUser", "authPass", "authInvite"]) {
+    $(id).addEventListener("input", () => {
+      $(id).classList.remove("input-error");
+    });
+  }
 
   wireOauth();
   initPwdToggles();

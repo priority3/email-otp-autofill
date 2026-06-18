@@ -81,6 +81,11 @@
       conn_locked_hint: "To change the server address, log out first.",
       invite_code: "Invite code",
       invalid_invite: "Invalid or used invite code.",
+      err_username_required: "Please enter a username.",
+      err_password_required: "Please enter a password.",
+      err_username_short: "Username must be at least 3 characters.",
+      err_password_short: "Password must be at least 8 characters.",
+      err_invite_required: "Please enter an invite code.",
 
       // --- shared verbs / states ---
       saving: "Saving…",
@@ -221,6 +226,11 @@
       conn_locked_hint: "要更换服务器地址，请先退出登录。",
       invite_code: "邀请码",
       invalid_invite: "邀请码无效或已被使用。",
+      err_username_required: "请输入用户名。",
+      err_password_required: "请输入密码。",
+      err_username_short: "用户名至少 3 个字符。",
+      err_password_short: "密码至少 8 个字符。",
+      err_invite_required: "请输入邀请码。",
 
       // --- shared verbs / states ---
       saving: "保存中…",

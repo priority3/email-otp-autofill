@@ -581,6 +581,17 @@ a:hover {
   color: var(--muted);
 }
 
+/* form validation feedback */
+.status-msg.msg-error {
+  color: var(--danger);
+}
+
+input.input-error,
+input.input-error:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 122, 122, 0.15);
+}
+
 /* ========== multi-tenant auth ========== */
 
 /* collapsible advanced (self-hosting) section */
