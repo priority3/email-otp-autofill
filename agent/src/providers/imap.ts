@@ -19,6 +19,80 @@ export type ImapProviderOptions = {
   store: OtpStore;
 };
 
+export type VerifyImapInput = {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  timeoutMs?: number;
+};
+
+export type VerifyImapResult = { ok: true } | { ok: false; error: string };
+
+// Normalize an IMAP error into a stable, user-actionable code.
+function classifyImapError(e: unknown): string {
+  const err = e as any;
+  // ImapFlow flags auth failures explicitly; trust that first.
+  if (err?.authenticationFailed === true || err?.responseStatus === "NO") return "auth_failed";
+  const msg = `${err?.message || ""} ${err?.responseText || ""} ${err?.response || ""} ${err || ""}`.toLowerCase();
+  if (/(authenticationfailed|login fail|invalid credentials|auth|password incorrect|授权|密码)/.test(msg)) {
+    return "auth_failed";
+  }
+  if (/(timeout|timed out)/.test(msg)) return "connect_timeout";
+  if (/(econn|enotfound|getaddrinfo|network|socket|refused|reset)/.test(msg)) return "network_error";
+  return "verify_failed";
+}
+
+// Short-lived connection that verifies credentials can log in and open INBOX,
+// then logs out. Used to validate a mailbox before saving it. Never throws —
+// returns a result with a normalized error code.
+export async function verifyImap(input: VerifyImapInput): Promise<VerifyImapResult> {
+  const timeoutMs = input.timeoutMs ?? 15000;
+  const client = new ImapFlow({
+    host: input.host,
+    port: input.port,
+    secure: input.secure,
+    auth: { user: input.user, pass: input.pass },
+    logger: false,
+    // Bound the handshake so a hung server doesn't block the request.
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
+  } as any);
+
+  // Hard overall deadline in case the library hangs past its own timeouts.
+  let timer: NodeJS.Timeout | null = null;
+  const deadline = new Promise<VerifyImapResult>((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, error: "connect_timeout" }), timeoutMs + 2000);
+  });
+
+  const attempt = (async (): Promise<VerifyImapResult> => {
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock("INBOX");
+      lock.release();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: classifyImapError(e) };
+    } finally {
+      try {
+        await client.logout();
+      } catch {
+        try {
+          client.close();
+        } catch {
+          // ignore
+        }
+      }
+    }
+  })();
+
+  const result = await Promise.race([attempt, deadline]);
+  if (timer) clearTimeout(timer);
+  return result;
+}
+
 function stripHtml(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, " ")

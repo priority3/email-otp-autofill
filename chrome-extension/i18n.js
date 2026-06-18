@@ -89,6 +89,9 @@
 
       // --- shared verbs / states ---
       saving: "Saving…",
+      verifying: "Verifying mailbox…",
+      verify_failed_auth: "Wrong auth code/password, or IMAP service is not enabled.",
+      verify_failed_conn: "Could not reach the mail server. Please try again.",
       saved: "Saved.",
       failed: "Failed.",
       failed_with: "Failed: {err}",
@@ -234,6 +237,9 @@
 
       // --- shared verbs / states ---
       saving: "保存中…",
+      verifying: "正在验证邮箱…",
+      verify_failed_auth: "授权码/密码错误，或未开启 IMAP 服务。",
+      verify_failed_conn: "无法连接邮箱服务器，请稍后重试。",
       saved: "已保存。",
       failed: "失败。",
       failed_with: "失败：{err}",

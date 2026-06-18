@@ -18,6 +18,7 @@ import {
 } from "./http/auth.js";
 import { OtpStore } from "./otp/store.js";
 import { ProviderManager, ProviderRegistry } from "./providers/manager.js";
+import { verifyImap } from "./providers/imap.js";
 import { db, migrateJsonToDb } from "./storage/db.js";
 import { migratePlaintextSecrets, secretGet, secretSet } from "./storage/secrets.js";
 import {
@@ -260,6 +261,15 @@ export async function startServer() {
     const Body = z.object({ email: z.string().email(), authCode: z.string().min(4) });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    // Verify the credentials can actually log in before saving (hard block).
+    const v = await verifyImap({
+      host: "imap.qq.com",
+      port: 993,
+      secure: true,
+      user: body.data.email,
+      pass: body.data.authCode,
+    });
+    if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
     const mgr = await mgrFor(req);
     await secretSet(mgr.secretKeyFor("qq", body.data.email), body.data.authCode);
     await mgr.addQqAccount(body.data.email);
@@ -314,6 +324,15 @@ export async function startServer() {
       return;
     }
 
+    // Verify before saving (hard block on bad credentials / IMAP off).
+    const v = await verifyImap({
+      host: "imap-mail.outlook.com",
+      port: 993,
+      secure: true,
+      user: data.email,
+      pass: data.appPassword,
+    });
+    if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
     await secretSet(mgr.secretKeyFor("outlook_imap", data.email), data.appPassword);
     await mgr.addOutlookImapAccount(data.email);
     res.json({ ok: true });

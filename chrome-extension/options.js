@@ -477,7 +477,10 @@ async function saveAccount() {
     setMsg("acctMsg", T("failed"));
     return;
   }
-  setMsg("acctMsg", T("saving"));
+  // Saving now verifies the mailbox server-side (real IMAP login), which takes
+  // a few seconds — show "verifying" and block double-clicks.
+  setMsg("acctMsg", T("verifying"));
+  $("acctSave").disabled = true;
   try {
     let r;
     if (type === "qq") {
@@ -491,12 +494,21 @@ async function saveAccount() {
       // Re-select the (now saved) account so the panel shows edit mode.
       selectAccount({ type, email, configured: true });
     } else {
-      setMsg("acctMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+      setMsg("acctMsg", verifyErrorText(r && r.error));
     }
   } catch (e) {
     setMsg("acctMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+  } finally {
+    $("acctSave").disabled = false;
   }
-  setTimeout(() => setMsg("acctMsg", ""), 2500);
+  setTimeout(() => setMsg("acctMsg", ""), 3500);
+}
+
+// Map a backend verification error code to a friendly message.
+function verifyErrorText(err) {
+  if (err === "auth_failed") return T("verify_failed_auth");
+  if (err === "connect_timeout" || err === "network_error") return T("verify_failed_conn");
+  return T("failed_with", { err: err || "" });
 }
 
 async function removeAccount() {
