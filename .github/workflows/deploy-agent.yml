@@ -1,0 +1,67 @@
+name: Deploy agent to Tencent CVM
+
+# Auto-deploy the agent when its code (or compose file) changes on main.
+# Pure-frontend / docs changes do not trigger a deploy.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy-agent.yml"
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+concurrency:
+  group: deploy-agent
+  cancel-in-progress: false # never interrupt an in-flight deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "$USER@$HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /opt/email-otp-autofill
+
+          echo "==> Pulling latest main"
+          git fetch --quiet origin main
+          git reset --hard origin/main
+          git log --oneline -1
+
+          echo "==> Building agent image"
+          docker compose build agent
+
+          echo "==> Restarting agent"
+          docker compose up -d agent
+
+          echo "==> Waiting for health"
+          sleep 5
+          docker compose ps
+
+          echo "==> Health check"
+          # status is reachable without auth; just confirm the service responds.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'x-otp-agent-client: email-otp-autofill' \
+            http://127.0.0.1:17373/v1/status || echo 000)
+          echo "status http_code=$code"
+          test "$code" = "200"
+
+          echo "==> Pruning old images"
+          docker image prune -f >/dev/null 2>&1 || true
+
+          echo "==> Deploy OK"
+          REMOTE
