@@ -13,17 +13,9 @@ export const AGENT_PORT = (() => {
 export const CLIENT_HEADER_NAME = "x-otp-agent-client";
 export const CLIENT_HEADER_VALUE = APP_ID;
 
-export const API_KEY_HEADER_NAME = "x-otp-agent-key";
-export const API_KEY = process.env.OTP_AGENT_API_KEY?.trim() || "";
-
-// Master key for at-rest encryption of file-stored secrets (non-macOS / Docker).
-// NEVER written to disk; a leaked secrets.json is useless without it.
+// Master key for at-rest encryption of stored email credentials. NEVER written
+// to disk; a leaked database is useless without it. Required in production.
 export const MASTER_KEY = process.env.OTP_AGENT_MASTER_KEY?.trim() || "";
-
-// Multi-tenant mode: when on, the agent requires login and isolates all data by
-// userId (for a public/shared instance). When off (default), it runs as a
-// single-user self-hosted instance (implicit "local" user, no login).
-export const MULTI_TENANT = /^(1|true|yes)$/i.test(process.env.OTP_AGENT_MULTI_TENANT?.trim() || "");
 
 // Admin token for the /admin panel + /v1/admin/* API. When unset, the admin
 // surface is disabled (returns 401).
@@ -35,6 +27,3 @@ export const DATA_DIR =
   process.env.OTP_AGENT_DATA_DIR?.trim() ||
   process.env.XDG_CONFIG_HOME?.trim() ||
   `${HOME}/.config/${APP_ID}`;
-
-export const CONFIG_PATH = `${DATA_DIR}/config.json`;
-export const SECRETS_PATH = `${DATA_DIR}/secrets.json`;

@@ -1,32 +1,78 @@
-# Email OTP Autofill (Local)
+# Email OTP Autofill
 
-Local helper + Chrome extension to fetch email one-time codes (OTP) from QQ Mail / Outlook and fill them into the current page via a hotkey.
+Fetch email one-time passcodes (OTP) from QQ Mail / Outlook and autofill them
+into the current page with a hotkey — via a local/self-hosted **agent** plus a
+Chrome (MV3) **extension**.
+
+## How it works
+
+The Chrome extension polls an **agent** service. The agent connects to your
+mailbox over IMAP / OAuth, extracts the latest verification code, and the
+extension fills it into the focused input when you press the hotkey.
+
+Two ways to connect:
+
+- **Public instance (zero setup)** — the extension ships pointing at
+  `https://otp.razet.me`. Register an account and go; no server of your own.
+- **Self-host** — run your own multi-tenant agent with Docker (one Docker
+  Compose command).
 
 ## Components
 
-- `agent/`: Local HTTP service on `127.0.0.1:17373` that connects to mailboxes and extracts OTP codes.
-- `chrome-extension/`: Chrome MV3 extension (hotkey fill, popup, onboarding/options UI).
+- `agent/`: Node/TypeScript HTTP service (default `127.0.0.1:17373`) that
+  connects to mailboxes, extracts OTP codes, encrypts stored credentials, and
+  persists state in SQLite.
+- `chrome-extension/`: Chrome MV3 extension (hotkey fill, popup, settings/
+  onboarding UI, account login, EN/中文 bilingual).
+
+## Features
+
+- **Mailboxes**: QQ Mail (IMAP auth code), Outlook (OAuth device-code flow —
+  recommended) or Outlook (IMAP app password). Multiple accounts run in
+  parallel.
+- **OTP extraction**: keyword + scoring match for 4–8 digit codes (中/English
+  keywords), with automatic validity-window detection (10s–24h).
+- **Hotkey autofill**: `⌘/Ctrl + Shift + .` finds the OTP input and fills it; a
+  red toolbar badge signals a fresh code (checked ~every 30s).
+- **Credential encryption**: AES-256-GCM (key derived from a master key via
+  scrypt); the master key lives only in the environment and is never written to
+  disk.
+- **Multi-tenant**: users register and log in; all mailboxes, OTPs and secrets
+  are isolated per account (30-day sessions persisted in SQLite).
+- **Admin panel**: `/admin` (token-gated) — user/mailbox stats, invite-code
+  management, optional "invite required" registration, enable/disable users.
+- **Bilingual UI**: 中 / English, switchable at runtime.
 
 ## Status
 
-MVP in-progress: QQ via IMAP first, Outlook via OAuth device-code flow (Graph) next, with plugin-guided setup.
+Beyond MVP: QQ IMAP, Outlook OAuth (Graph device-code) and Outlook IMAP are all
+working; multi-tenant with SQLite-backed persistence and at-rest credential
+encryption; one-command Docker deploy.
 
-## Run Locally (macOS)
+## Load the extension
 
-```bash
-git clone https://github.com/priority3/email-otp-autofill.git
-cd email-otp-autofill/agent
-npm install
-npm run dev
-```
+Chrome → `chrome://extensions` → enable Developer Mode → **Load unpacked** →
+select the `chrome-extension/` folder.
 
-Load the extension unpacked from `chrome-extension/` in Chrome (Developer Mode).
+## Use the public instance (no setup)
+
+1. Load the extension (above).
+2. Open the extension's **Settings** — the Agent is pre-set to
+   `https://otp.razet.me`.
+3. **Register / log in** (the public instance is multi-tenant, so login is
+   required; enter an invite code if the instance has invite-only signup on).
+4. Configure a mailbox and use it — see below.
 
 ## 使用方法 (Usage)
 
+### 0. 登录
+
+设置页顶部「账号」区**注册或登录**；成功后扩展会带上你的会话凭据访问 agent。
+（若实例开启了「邀请码注册」，注册时需填管理员发放的邀请码。）
+
 ### 1. 配置邮箱（在扩展的「设置」页）
 
-点击扩展图标 → `设置`（Settings）。顶部确认 `Agent` 状态为 **正常 / OK**（默认地址 `http://127.0.0.1:17373`）。
+点击扩展图标 → `设置`（Settings）。顶部确认 `Agent` 状态为 **正常 / OK**。
 
 - **QQ 邮箱（IMAP）**：登录 [QQ 邮箱网页版](https://mail.qq.com) → 设置 → 账号 → 开启「IMAP/SMTP 服务」→ 按提示短信验证 → 得到 **授权码**（不是登录密码）。把 QQ 邮箱和授权码填入设置页 → `保存 QQ`。
 - **Outlook（OAuth，推荐）**：在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) 新建注册（账户类型选「Personal Microsoft accounts only」，无需 Redirect URI，并在 Authentication 页把「Allow public client flows」设为 Yes）→ 复制 Application (client) ID 填入 → `保存 Client ID` → `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
@@ -50,79 +96,79 @@ Load the extension unpacked from `chrome-extension/` in Chrome (Developer Mode).
 
 popup 和设置页右上角有**中 / English 切换**，首次跟随浏览器语言，之后记住你的选择。
 
-## Deploy Agent On A Server (Docker)
-
-This repo ships with a `docker-compose.yml` that can:
-
-- run the agent (binds to `127.0.0.1:17373` on the server by default)
-- optionally run `cloudflared` to expose the agent via Cloudflare Tunnel (no SSH port-forwarding needed)
-
-On the server:
+## Self-host the agent (Docker)
 
 ```bash
 git clone https://github.com/priority3/email-otp-autofill.git
 cd email-otp-autofill
-```
-
-### Option A: Cloudflare Tunnel (Recommended)
-
-1. Create a Cloudflare Tunnel and configure a hostname to route to `http://agent:17373` (so it works inside Compose).
-2. Generate a master key (encrypts email credentials at rest) and an API key.
-3. Put them in a local `.env` on the server (do not commit — see `.env.example`):
-
-```bash
 cp .env.example .env
-# then edit .env, or generate values directly:
-cat > .env <<EOF
-OTP_AGENT_MASTER_KEY=$(openssl rand -base64 32)
-OTP_AGENT_API_KEY=$(openssl rand -base64 24)
-CF_TUNNEL_TOKEN=your_tunnel_token
-EOF
 ```
 
-> ⚠️ **Keep `OTP_AGENT_MASTER_KEY` safe and stable.** It is what decrypts your
-> stored email credentials. If you lose it, you must re-enter every mailbox
-> credential. If you change it, previously stored secrets can no longer be
-> decrypted. It is never written to disk.
-
-4. Start:
+Set two secrets in `.env` (users register/log in with their own accounts; their
+data is isolated — there is no shared API key to hand out):
 
 ```bash
-docker compose --profile cloudflare up -d --build
+OTP_AGENT_MASTER_KEY=$(openssl rand -base64 32)   # at-rest encryption (required)
+OTP_ADMIN_TOKEN=$(openssl rand -base64 24)        # for the /admin panel
 ```
 
-In the extension settings:
-
-- `Agent Base URL`: `https://your.domain.tld`
-- `Agent API Key`: same as `OTP_AGENT_API_KEY`
-
-### Option B: SSH Port-Forward (Fallback)
-
-Start agent only:
+Start it:
 
 ```bash
 docker compose up -d --build
 ```
 
-Then from your laptop:
+- **Users**: register / log in from the extension's Settings, then point
+  **Agent Base URL** at your address.
+- **You (admin)**: open `https://your.domain.tld/admin`, sign in with the admin
+  token to manage invite codes, users, and view stats. Toggle "invite required"
+  there if you want closed signup.
 
-```bash
-ssh -N -L 17373:127.0.0.1:17373 root@YOUR_SERVER_IP
-```
+### Exposing it publicly
 
-## Secrets Storage
+- **Cloudflare Tunnel (recommended)** — create a Tunnel routing to
+  `http://agent:17373` (so it resolves inside Compose), put the run token in
+  `.env` as `CF_TUNNEL_TOKEN`, and start with the profile:
 
-How email credentials (QQ auth code / Outlook app password) are stored at rest:
+  ```bash
+  docker compose --profile cloudflare up -d --build
+  ```
 
-- **macOS (local dev)**: macOS Keychain (service name: `email-otp-autofill`).
-- **Linux / Docker**: encrypted in `./data/secrets.json` using **AES-256-GCM**,
-  with the key derived (scrypt) from `OTP_AGENT_MASTER_KEY`. The master key is
-  only read from the environment and is never written to disk — a leaked
-  `secrets.json` is useless without it.
-- **Linux / Docker without a master key**: falls back to **plaintext** in
-  `secrets.json` and prints a startup warning. Only acceptable for throwaway
-  local testing — **always set `OTP_AGENT_MASTER_KEY` for networked/server use.**
+  Then set the extension's **Agent Base URL** to `https://your.domain.tld`.
 
-Existing plaintext `secrets.json` files are automatically re-encrypted on the
-next startup once a master key is set.
+- **SSH port-forward (fallback)** — the agent binds to `127.0.0.1:17373` on the
+  server; from your laptop:
 
+  ```bash
+  ssh -N -L 17373:127.0.0.1:17373 root@YOUR_SERVER_IP
+  ```
+
+> ⚠️ **Keep `OTP_AGENT_MASTER_KEY` safe and stable.** It decrypts your stored
+> email credentials. Lose it and every mailbox must be re-entered; change it and
+> previously stored secrets can no longer be decrypted. It is never written to
+> disk.
+
+## Secrets storage
+
+Email credentials (QQ auth code / Outlook app password / OAuth tokens) are
+stored encrypted in the SQLite DB under the `data/` volume using **AES-256-GCM**,
+with the key derived (scrypt) from `OTP_AGENT_MASTER_KEY`. The master key is
+only read from the environment and is never written to disk — a leaked database
+is useless without it.
+
+Without a master key the agent falls back to **plaintext** and prints a startup
+warning (only acceptable for throwaway local testing). Existing plaintext
+secrets are automatically re-encrypted on the next startup once a key is set.
+
+## Admin API (multi-tenant)
+
+Token-gated by `OTP_ADMIN_TOKEN` (send as a Bearer token). Highlights:
+
+- `GET /v1/admin/stats` — user counts, recent activity, invite usage.
+- `GET/POST /v1/admin/invites`, `POST /v1/admin/invites/revoke` — manage invite
+  codes.
+- `POST /v1/admin/settings` — toggle invite-required registration.
+- `GET /v1/admin/users`, `POST /v1/admin/users/disable` — list / enable /
+  disable users.
+
+A browser UI for the same lives at `/admin`.

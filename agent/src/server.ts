@@ -1,14 +1,12 @@
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import express from "express";
 import { z } from "zod";
 
-import { AGENT_HOST, AGENT_PORT, MASTER_KEY, MULTI_TENANT } from "./constants.js";
-import { cors, noStore, requireApiKey, requireClientHeader } from "./http/middleware.js";
+import { AGENT_HOST, AGENT_PORT, MASTER_KEY } from "./constants.js";
+import { cors, noStore, requireClientHeader } from "./http/middleware.js";
 import {
-  LOCAL_USER_ID,
   createSession,
   destroySession,
   destroyUserSessions,
@@ -55,19 +53,12 @@ function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefin
 }
 
 export async function startServer() {
-  // Security posture check: on non-macOS (file store) without a master key,
-  // secrets are written in plaintext. Warn loudly — unsafe for any deployment.
-  if (os.platform() !== "darwin" && !MASTER_KEY) {
+  // Every user's email credentials are encrypted at rest with the master key;
+  // without it they would be stored in plaintext.
+  if (!MASTER_KEY) {
     console.warn(
-      "[otp-agent] WARNING: OTP_AGENT_MASTER_KEY is not set — email credentials will be stored " +
-        "in PLAINTEXT in secrets.json. Set OTP_AGENT_MASTER_KEY for any networked/server deployment."
-    );
-  }
-  // Multi-tenant public instances MUST encrypt at rest.
-  if (MULTI_TENANT && !MASTER_KEY) {
-    console.warn(
-      "[otp-agent] WARNING: multi-tenant mode without OTP_AGENT_MASTER_KEY — every user's email " +
-        "credentials would be stored in plaintext. Set OTP_AGENT_MASTER_KEY."
+      "[otp-agent] WARNING: OTP_AGENT_MASTER_KEY is not set — email credentials would be stored " +
+        "in PLAINTEXT. Set OTP_AGENT_MASTER_KEY."
     );
   }
   // Import any legacy JSON files into SQLite (one-time, before reading the DB).
@@ -79,121 +70,108 @@ export async function startServer() {
   app.use(cors);
   app.use(noStore);
   app.use(express.json({ limit: "256kb" }));
-  app.use(requireApiKey);
   app.use(requireClientHeader);
 
   const store = new OtpStore();
   const registry = new ProviderRegistry(store);
 
-  // Boot watchers: single-tenant → just "local"; multi-tenant → all users.
-  if (MULTI_TENANT) {
-    await registry.bootstrap(await listUserIds());
-  } else {
-    await registry.getOrCreate(LOCAL_USER_ID);
-  }
+  // Boot watchers for every registered user.
+  await registry.bootstrap(await listUserIds());
 
-  // Resolve the ProviderManager for the current request's user.
+  // Resolve the ProviderManager for the current request's authenticated user.
   async function mgrFor(req: express.Request): Promise<ProviderManager> {
-    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
-    return registry.getOrCreate(userId);
+    return registry.getOrCreate(String(req.userId));
   }
 
-  // ---- auth endpoints (multi-tenant only) --------------------------------
-  if (MULTI_TENANT) {
-    const Creds = z.object({
-      username: z.string().min(3).max(64),
-      password: z.string().min(8).max(200),
-    });
+  // ---- auth endpoints ----------------------------------------------------
+  const Creds = z.object({
+    username: z.string().min(3).max(64),
+    password: z.string().min(8).max(200),
+  });
 
-    const RegBody = Creds.extend({ inviteCode: z.string().trim().optional() });
+  const RegBody = Creds.extend({ inviteCode: z.string().trim().optional() });
 
-    app.post("/v1/auth/register", async (req, res) => {
-      const body = RegBody.safeParse(req.body);
-      if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+  app.post("/v1/auth/register", async (req, res) => {
+    const body = RegBody.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
 
-      const code = (body.data.inviteCode || "").toUpperCase();
-      // Pre-check the invite when required; the actual claim happens after the
-      // user row is created (atomic consumeInvite guards against double-use).
+    const code = (body.data.inviteCode || "").toUpperCase();
+    // Pre-check the invite when required; the actual claim happens after the
+    // user row is created (atomic consumeInvite guards against double-use).
+    if (isInviteRequired()) {
+      if (!code || !isInviteUsable(code)) {
+        return res.status(400).json({ ok: false, error: "invalid_invite" });
+      }
+    }
+
+    try {
+      const user = await createUser(body.data.username, body.data.password, code || undefined);
       if (isInviteRequired()) {
-        if (!code || !isInviteUsable(code)) {
+        // Claim atomically; if someone raced us to the code, roll back.
+        if (!consumeInvite(code, user.id)) {
+          db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
           return res.status(400).json({ ok: false, error: "invalid_invite" });
         }
       }
-
-      try {
-        const user = await createUser(body.data.username, body.data.password, code || undefined);
-        if (isInviteRequired()) {
-          // Claim atomically; if someone raced us to the code, roll back.
-          if (!consumeInvite(code, user.id)) {
-            db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
-            return res.status(400).json({ ok: false, error: "invalid_invite" });
-          }
-        }
-        await registry.getOrCreate(user.id); // empty config, ready for accounts
-        const token = createSession(user.id);
-        res.json({ ok: true, token, user: { id: user.id, username: user.username } });
-      } catch (e) {
-        const msg = String((e as any)?.message || e);
-        res.status(msg === "username_taken" ? 409 : 400).json({ ok: false, error: msg });
-      }
-    });
-
-    app.post("/v1/auth/login", async (req, res) => {
-      const body = Creds.safeParse(req.body);
-      if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-      const user = await findByUsername(body.data.username);
-      if (!user || !verifyPassword(body.data.password, user.passwordHash)) {
-        return res.status(401).json({ ok: false, error: "invalid_credentials" });
-      }
-      if (user.disabled) {
-        return res.status(401).json({ ok: false, error: "account_disabled" });
-      }
+      await registry.getOrCreate(user.id); // empty config, ready for accounts
       const token = createSession(user.id);
       res.json({ ok: true, token, user: { id: user.id, username: user.username } });
-    });
+    } catch (e) {
+      const msg = String((e as any)?.message || e);
+      res.status(msg === "username_taken" ? 409 : 400).json({ ok: false, error: msg });
+    }
+  });
 
-    app.post("/v1/auth/logout", requireAuth, (req, res) => {
-      const h = String(req.headers.authorization || "");
-      const m = /^Bearer\s+(.+)$/i.exec(h);
-      if (m) destroySession(m[1]!.trim());
-      res.json({ ok: true });
-    });
+  app.post("/v1/auth/login", async (req, res) => {
+    const body = Creds.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const user = await findByUsername(body.data.username);
+    if (!user || !verifyPassword(body.data.password, user.passwordHash)) {
+      return res.status(401).json({ ok: false, error: "invalid_credentials" });
+    }
+    if (user.disabled) {
+      return res.status(401).json({ ok: false, error: "account_disabled" });
+    }
+    const token = createSession(user.id);
+    res.json({ ok: true, token, user: { id: user.id, username: user.username } });
+  });
 
-    app.get("/v1/auth/me", requireAuth, async (req, res) => {
-      const user = await getUser(String(req.userId));
-      if (!user) return res.status(401).json({ ok: false, error: "unauthorized" });
-      res.json({ ok: true, user: { id: user.id, username: user.username } });
-    });
+  app.post("/v1/auth/logout", requireAuth, (req, res) => {
+    const h = String(req.headers.authorization || "");
+    const m = /^Bearer\s+(.+)$/i.exec(h);
+    if (m) destroySession(m[1]!.trim());
+    res.json({ ok: true });
+  });
 
-    // Gate: every /v1 route except status, auth, and admin requires a valid
-    // user session. Admin routes have their own requireAdmin guard.
-    app.use((req, res, next) => {
-      const p = req.path;
-      if (!p.startsWith("/v1/")) return next();
-      if (p === "/v1/status" || p.startsWith("/v1/auth/") || p.startsWith("/v1/admin/")) return next();
-      return requireAuth(req, res, next);
-    });
-  }
+  app.get("/v1/auth/me", requireAuth, async (req, res) => {
+    const user = await getUser(String(req.userId));
+    if (!user) return res.status(401).json({ ok: false, error: "unauthorized" });
+    res.json({ ok: true, user: { id: user.id, username: user.username } });
+  });
+
+  // Gate: every /v1 route except status, auth, and admin requires a valid user
+  // session. Admin routes have their own requireAdmin guard.
+  app.use((req, res, next) => {
+    const p = req.path;
+    if (!p.startsWith("/v1/")) return next();
+    if (p === "/v1/status" || p.startsWith("/v1/auth/") || p.startsWith("/v1/admin/")) return next();
+    return requireAuth(req, res, next);
+  });
 
   // ---- status ------------------------------------------------------------
   app.get("/v1/status", async (req, res) => {
-    // status is reachable without auth; report per-user data only when a valid
-    // session is present (multi-tenant), else the local user (single-tenant).
-    let userId = LOCAL_USER_ID;
-    if (MULTI_TENANT) {
-      const h = String(req.headers.authorization || "");
-      const m = /^Bearer\s+(.+)$/i.exec(h);
-      const uid = m ? resolveSession(m[1]!.trim()) : null;
-      if (!uid) {
-        return res.json({
-          ok: true,
-          agent: { host: AGENT_HOST, port: AGENT_PORT },
-          multiTenant: true,
-          authenticated: false,
-          requireInvite: isInviteRequired(),
-        });
-      }
-      userId = uid;
+    // Reachable without auth; reports per-user data only with a valid session.
+    const h = String(req.headers.authorization || "");
+    const m = /^Bearer\s+(.+)$/i.exec(h);
+    const userId = m ? resolveSession(m[1]!.trim()) : null;
+    if (!userId) {
+      return res.json({
+        ok: true,
+        agent: { host: AGENT_HOST, port: AGENT_PORT },
+        multiTenant: true,
+        authenticated: false,
+        requireInvite: isInviteRequired(),
+      });
     }
     const mgr = await registry.getOrCreate(userId);
     const cfg = mgr.config;
@@ -214,7 +192,7 @@ export async function startServer() {
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
-      multiTenant: MULTI_TENANT,
+      multiTenant: true,
       authenticated: true,
       config: {
         pollIntervalMs: cfg.pollIntervalMs,
@@ -232,7 +210,7 @@ export async function startServer() {
 
   // ---- OTP ---------------------------------------------------------------
   app.get("/v1/otp/latest", (req, res) => {
-    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
+    const userId = String(req.userId);
     const maxAgeSec = Number(req.query.max_age ?? "120");
     const maxAgeMs = Number.isFinite(maxAgeSec) ? Math.max(1, Math.min(600, Math.floor(maxAgeSec))) * 1000 : 120_000;
     const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
@@ -243,7 +221,7 @@ export async function startServer() {
   });
 
   app.post("/v1/otp/consume", (req, res) => {
-    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
+    const userId = String(req.userId);
     const Body = z.object({ id: z.string().min(8) });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
@@ -252,7 +230,7 @@ export async function startServer() {
   });
 
   app.get("/v1/otp/list", (req, res) => {
-    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
+    const userId = String(req.userId);
     res.json({ ok: true, items: store.list(20, userId) });
   });
 
@@ -487,8 +465,7 @@ export async function startServer() {
   const server = app.listen(AGENT_PORT, AGENT_HOST, () => {
     // eslint-disable-next-line no-console
     console.log(
-      `[otp-agent] listening on http://${AGENT_HOST}:${AGENT_PORT}` +
-        (MULTI_TENANT ? " (multi-tenant)" : "")
+      `[otp-agent] listening on http://${AGENT_HOST}:${AGENT_PORT}`
     );
   });
 

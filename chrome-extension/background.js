@@ -10,11 +10,9 @@ function translateFillError(lang, code) {
 
 const CLIENT_HEADER_NAME = "x-otp-agent-client";
 const CLIENT_HEADER_VALUE = "email-otp-autofill";
-const API_KEY_HEADER_NAME = "x-otp-agent-key";
 
 const DEFAULTS = {
   agentBaseUrl: "https://otp.razet.me",
-  agentApiKey: "",
   maxAgeSec: 120,
   providers: ["qq", "outlook"]
 };
@@ -23,7 +21,6 @@ async function getSettings() {
   const raw = await chrome.storage.local.get([...Object.keys(DEFAULTS), "authToken"]);
   return {
     agentBaseUrl: raw.agentBaseUrl || DEFAULTS.agentBaseUrl,
-    agentApiKey: typeof raw.agentApiKey === "string" ? raw.agentApiKey : DEFAULTS.agentApiKey,
     maxAgeSec: Number.isFinite(raw.maxAgeSec) ? raw.maxAgeSec : DEFAULTS.maxAgeSec,
     providers: Array.isArray(raw.providers) && raw.providers.length ? raw.providers : DEFAULTS.providers,
     authToken: typeof raw.authToken === "string" ? raw.authToken : ""
@@ -35,8 +32,7 @@ async function agentFetch(path, init = {}) {
   const url = s.agentBaseUrl.replace(/\/$/, "") + path;
   const headers = new Headers(init.headers || {});
   headers.set(CLIENT_HEADER_NAME, CLIENT_HEADER_VALUE);
-  if (s.agentApiKey) headers.set(API_KEY_HEADER_NAME, s.agentApiKey);
-  // Multi-tenant session token (no-op for single-tenant instances).
+  // Multi-tenant session token from login.
   if (s.authToken) headers.set("authorization", `Bearer ${s.authToken}`);
   if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
   const res = await fetch(url, { ...init, headers });
