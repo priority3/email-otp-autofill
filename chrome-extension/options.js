@@ -288,6 +288,7 @@ async function saveConnection() {
 // ---- multi-tenant auth gating --------------------------------------------
 let authMode = "login"; // "login" | "register"
 let bootSelected = false; // whether the default detail panel was chosen once
+let requireInvite = false; // whether this instance requires an invite to register
 
 // Toggle the login panel vs the settings UI based on the agent status payload.
 // Returns true if the settings UI should be shown (single-tenant, or logged in).
@@ -299,6 +300,13 @@ function applyAuthState(status) {
   $("loginPanel").hidden = authed;
   $("authBar").hidden = !(multiTenant && authed);
   if (layout) layout.hidden = !authed;
+
+  // Remember whether this instance requires an invite (only present on the
+  // unauthenticated status payload) and refresh the invite field visibility.
+  if (!authed) {
+    requireInvite = !!(status && status.requireInvite);
+    setAuthMode(authMode);
+  }
   return authed;
 }
 
@@ -328,6 +336,9 @@ function setAuthMode(mode) {
   $("loginTitle").textContent = T(isLogin ? "login" : "register");
   $("authSubmit").textContent = T(isLogin ? "login" : "register");
   $("authToggle").textContent = T(isLogin ? "switch_to_register" : "switch_to_login");
+  // Invite code only matters when registering on an instance that requires it.
+  const row = $("authInviteRow");
+  if (row) row.hidden = !(mode === "register" && requireInvite);
   setMsg("authMsg", "");
 }
 
@@ -338,12 +349,17 @@ async function submitAuth() {
   setMsg("authMsg", T("saving"));
   try {
     const type = authMode === "register" ? "BG_AUTH_REGISTER" : "BG_AUTH_LOGIN";
-    const r = await bg({ type, username, password });
+    const msg = { type, username, password };
+    if (authMode === "register") msg.inviteCode = $("authInvite").value.trim();
+    const r = await bg(msg);
     if (r && r.ok) {
       $("authPass").value = "";
+      $("authInvite").value = "";
       await refreshStatus();
     } else {
-      setMsg("authMsg", T("auth_failed", { err: (r && r.error) || "" }));
+      const err = (r && r.error) || "";
+      // Friendlier message for the common invite-code rejection.
+      setMsg("authMsg", err === "invalid_invite" ? T("invalid_invite") : T("auth_failed", { err }));
     }
   } catch (e) {
     setMsg("authMsg", T("auth_failed", { err: String(e && e.message ? e.message : e) }));

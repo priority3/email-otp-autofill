@@ -79,6 +79,8 @@
       save_connection: "Save & connect",
       connected_ok: "Connected.",
       conn_locked_hint: "To change the server address, log out first.",
+      invite_code: "Invite code",
+      invalid_invite: "Invalid or used invite code.",
 
       // --- shared verbs / states ---
       saving: "Saving…",
@@ -217,6 +219,8 @@
       save_connection: "保存并连接",
       connected_ok: "已连接。",
       conn_locked_hint: "要更换服务器地址，请先退出登录。",
+      invite_code: "邀请码",
+      invalid_invite: "邀请码无效或已被使用。",
 
       // --- shared verbs / states ---
       saving: "保存中…",

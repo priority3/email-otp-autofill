@@ -39,6 +39,10 @@
           <input id="authPass" type="password" autocomplete="current-password" />
           <button type="button" class="pwd-toggle" data-toggle="authPass" aria-label="Show password"></button>
         </div>
+        <div id="authInviteRow" hidden>
+          <label for="authInvite" data-i18n="invite_code">Invite code</label>
+          <input id="authInvite" autocomplete="off" />
+        </div>
         <div class="row" style="margin-top:14px;">
           <button id="authSubmit" class="primary" data-i18n="login">Log in</button>
           <span id="authMsg" class="status-msg"></span>

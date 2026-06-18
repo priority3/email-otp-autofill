@@ -199,9 +199,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     // --- multi-tenant auth ---
     if (msg.type === "BG_AUTH_REGISTER" || msg.type === "BG_AUTH_LOGIN") {
       const path = msg.type === "BG_AUTH_REGISTER" ? "/v1/auth/register" : "/v1/auth/login";
+      const payload = { username: msg.username, password: msg.password };
+      if (msg.type === "BG_AUTH_REGISTER" && msg.inviteCode) payload.inviteCode = msg.inviteCode;
       const json = await agentFetch(path, {
         method: "POST",
-        body: JSON.stringify({ username: msg.username, password: msg.password })
+        body: JSON.stringify(payload)
       });
       // Persist the session token; agentFetch attaches it on subsequent calls.
       if (json && json.token) await chrome.storage.local.set({ authToken: json.token });
