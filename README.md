@@ -67,15 +67,23 @@ cd email-otp-autofill
 ### Option A: Cloudflare Tunnel (Recommended)
 
 1. Create a Cloudflare Tunnel and configure a hostname to route to `http://agent:17373` (so it works inside Compose).
-2. Create a random API key and set it on the server.
-3. Put both in a local `.env` on the server (do not commit):
+2. Generate a master key (encrypts email credentials at rest) and an API key.
+3. Put them in a local `.env` on the server (do not commit — see `.env.example`):
 
 ```bash
-cat > .env <<'EOF'
-OTP_AGENT_API_KEY=your_random_api_key
+cp .env.example .env
+# then edit .env, or generate values directly:
+cat > .env <<EOF
+OTP_AGENT_MASTER_KEY=$(openssl rand -base64 32)
+OTP_AGENT_API_KEY=$(openssl rand -base64 24)
 CF_TUNNEL_TOKEN=your_tunnel_token
 EOF
 ```
+
+> ⚠️ **Keep `OTP_AGENT_MASTER_KEY` safe and stable.** It is what decrypts your
+> stored email credentials. If you lose it, you must re-enter every mailbox
+> credential. If you change it, previously stored secrets can no longer be
+> decrypted. It is never written to disk.
 
 4. Start:
 
@@ -104,5 +112,17 @@ ssh -N -L 17373:127.0.0.1:17373 root@YOUR_SERVER_IP
 
 ## Secrets Storage
 
-- macOS: stored in Keychain (service name: `email-otp-autofill`)
-- Linux/Docker: stored in `./data/secrets.json` (make sure only root can read it)
+How email credentials (QQ auth code / Outlook app password) are stored at rest:
+
+- **macOS (local dev)**: macOS Keychain (service name: `email-otp-autofill`).
+- **Linux / Docker**: encrypted in `./data/secrets.json` using **AES-256-GCM**,
+  with the key derived (scrypt) from `OTP_AGENT_MASTER_KEY`. The master key is
+  only read from the environment and is never written to disk — a leaked
+  `secrets.json` is useless without it.
+- **Linux / Docker without a master key**: falls back to **plaintext** in
+  `secrets.json` and prints a startup warning. Only acceptable for throwaway
+  local testing — **always set `OTP_AGENT_MASTER_KEY` for networked/server use.**
+
+Existing plaintext `secrets.json` files are automatically re-encrypted on the
+next startup once a master key is set.
+

@@ -1,5 +1,14 @@
 import { startServer } from "./server.js";
 
+// Defense-in-depth: never let a stray async error (e.g. a flaky IMAP connection
+// for one account) take down the whole agent. Log and keep serving.
+process.on("unhandledRejection", (reason) => {
+  console.error("[otp-agent] unhandledRejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[otp-agent] uncaughtException:", err);
+});
+
 async function main() {
   const cmd = process.argv.slice(2)[0];
   if (cmd === "help" || cmd === "--help" || cmd === "-h") {

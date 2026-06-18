@@ -11,6 +11,7 @@ export type ImapAuth = {
 
 export type ImapProviderOptions = {
   providerId: ProviderId;
+  userId?: string; // owning user (multi-tenant); defaults to "local"
   host: string;
   port: number;
   secure: boolean;
@@ -147,8 +148,11 @@ export class ImapOtpWatcher {
 
       this.opts.store.add({
         provider: this.opts.providerId,
+        userId: this.opts.userId,
+        account: this.opts.auth.user,
         code: best.code,
         receivedAt,
+        ttlSec: best.ttlSec,
         from,
         subject,
         messageId,

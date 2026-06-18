@@ -1,11 +1,22 @@
+import os from "node:os";
+
 import express from "express";
 import { z } from "zod";
 
-import { AGENT_HOST, AGENT_PORT } from "./constants.js";
+import { AGENT_HOST, AGENT_PORT, MASTER_KEY, MULTI_TENANT } from "./constants.js";
 import { cors, noStore, requireApiKey, requireClientHeader } from "./http/middleware.js";
+import {
+  LOCAL_USER_ID,
+  createSession,
+  destroySession,
+  requireAuth,
+  resolveSession,
+} from "./http/auth.js";
 import { OtpStore } from "./otp/store.js";
-import { ProviderManager } from "./providers/manager.js";
-import { secretGet, secretSet } from "./storage/secrets.js";
+import { ProviderManager, ProviderRegistry } from "./providers/manager.js";
+import { migrateJsonToDb } from "./storage/db.js";
+import { migratePlaintextSecrets, secretGet, secretSet } from "./storage/secrets.js";
+import { createUser, findByUsername, getUser, listUserIds, verifyPassword } from "./storage/users.js";
 
 function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefined {
   if (!raw) return undefined;
@@ -21,6 +32,25 @@ function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefin
 }
 
 export async function startServer() {
+  // Security posture check: on non-macOS (file store) without a master key,
+  // secrets are written in plaintext. Warn loudly — unsafe for any deployment.
+  if (os.platform() !== "darwin" && !MASTER_KEY) {
+    console.warn(
+      "[otp-agent] WARNING: OTP_AGENT_MASTER_KEY is not set — email credentials will be stored " +
+        "in PLAINTEXT in secrets.json. Set OTP_AGENT_MASTER_KEY for any networked/server deployment."
+    );
+  }
+  // Multi-tenant public instances MUST encrypt at rest.
+  if (MULTI_TENANT && !MASTER_KEY) {
+    console.warn(
+      "[otp-agent] WARNING: multi-tenant mode without OTP_AGENT_MASTER_KEY — every user's email " +
+        "credentials would be stored in plaintext. Set OTP_AGENT_MASTER_KEY."
+    );
+  }
+  // Import any legacy JSON files into SQLite (one-time, before reading the DB).
+  migrateJsonToDb();
+  await migratePlaintextSecrets();
+
   const app = express();
   app.disable("x-powered-by");
   app.use(cors);
@@ -30,93 +60,190 @@ export async function startServer() {
   app.use(requireClientHeader);
 
   const store = new OtpStore();
-  const mgr = await ProviderManager.create(store);
-  await mgr.reconcile();
+  const registry = new ProviderRegistry(store);
 
-  app.get("/v1/status", async (_req, res) => {
+  // Boot watchers: single-tenant → just "local"; multi-tenant → all users.
+  if (MULTI_TENANT) {
+    await registry.bootstrap(await listUserIds());
+  } else {
+    await registry.getOrCreate(LOCAL_USER_ID);
+  }
+
+  // Resolve the ProviderManager for the current request's user.
+  async function mgrFor(req: express.Request): Promise<ProviderManager> {
+    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
+    return registry.getOrCreate(userId);
+  }
+
+  // ---- auth endpoints (multi-tenant only) --------------------------------
+  if (MULTI_TENANT) {
+    const Creds = z.object({
+      username: z.string().min(3).max(64),
+      password: z.string().min(8).max(200),
+    });
+
+    app.post("/v1/auth/register", async (req, res) => {
+      const body = Creds.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+      try {
+        const user = await createUser(body.data.username, body.data.password);
+        await registry.getOrCreate(user.id); // empty config, ready for accounts
+        const token = createSession(user.id);
+        res.json({ ok: true, token, user: { id: user.id, username: user.username } });
+      } catch (e) {
+        const msg = String((e as any)?.message || e);
+        res.status(msg === "username_taken" ? 409 : 400).json({ ok: false, error: msg });
+      }
+    });
+
+    app.post("/v1/auth/login", async (req, res) => {
+      const body = Creds.safeParse(req.body);
+      if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+      const user = await findByUsername(body.data.username);
+      if (!user || !verifyPassword(body.data.password, user.passwordHash)) {
+        return res.status(401).json({ ok: false, error: "invalid_credentials" });
+      }
+      const token = createSession(user.id);
+      res.json({ ok: true, token, user: { id: user.id, username: user.username } });
+    });
+
+    app.post("/v1/auth/logout", requireAuth, (req, res) => {
+      const h = String(req.headers.authorization || "");
+      const m = /^Bearer\s+(.+)$/i.exec(h);
+      if (m) destroySession(m[1]!.trim());
+      res.json({ ok: true });
+    });
+
+    app.get("/v1/auth/me", requireAuth, async (req, res) => {
+      const user = await getUser(String(req.userId));
+      if (!user) return res.status(401).json({ ok: false, error: "unauthorized" });
+      res.json({ ok: true, user: { id: user.id, username: user.username } });
+    });
+
+    // Gate: every /v1 route except status + auth requires a valid session.
+    app.use((req, res, next) => {
+      const p = req.path;
+      if (!p.startsWith("/v1/")) return next();
+      if (p === "/v1/status" || p.startsWith("/v1/auth/")) return next();
+      return requireAuth(req, res, next);
+    });
+  }
+
+  // ---- status ------------------------------------------------------------
+  app.get("/v1/status", async (req, res) => {
+    // status is reachable without auth; report per-user data only when a valid
+    // session is present (multi-tenant), else the local user (single-tenant).
+    let userId = LOCAL_USER_ID;
+    if (MULTI_TENANT) {
+      const h = String(req.headers.authorization || "");
+      const m = /^Bearer\s+(.+)$/i.exec(h);
+      const uid = m ? resolveSession(m[1]!.trim()) : null;
+      if (!uid) {
+        return res.json({ ok: true, agent: { host: AGENT_HOST, port: AGENT_PORT }, multiTenant: true, authenticated: false });
+      }
+      userId = uid;
+    }
+    const mgr = await registry.getOrCreate(userId);
     const cfg = mgr.config;
-    const qqConfigured = cfg.qq.email ? Boolean(await secretGet(`qq:${cfg.qq.email}`)) : false;
+    const qqAccounts = await Promise.all(
+      cfg.qq.accounts.map(async (a) => ({
+        email: a.email,
+        configured: Boolean(await secretGet(mgr.secretKeyFor("qq", a.email))),
+      }))
+    );
+    const imapAccounts = await Promise.all(
+      cfg.outlook.imapAccounts.map(async (a) => ({
+        email: a.email,
+        configured: Boolean(await secretGet(mgr.secretKeyFor("outlook_imap", a.email))),
+      }))
+    );
     const outlookOauthConnected =
       cfg.outlook.mode === "oauth" ? await mgr.getOutlookOAuth().hasRefreshToken() : false;
-    const outlookImapConfigured =
-      cfg.outlook.mode === "imap" && cfg.outlook.imapEmail
-        ? Boolean(await secretGet(`outlook_imap:${cfg.outlook.imapEmail}`))
-        : false;
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
+      multiTenant: MULTI_TENANT,
+      authenticated: true,
       config: {
         pollIntervalMs: cfg.pollIntervalMs,
-        qq: { email: cfg.qq.email ?? null, configured: qqConfigured },
+        qq: { accounts: qqAccounts },
         outlook: {
           mode: cfg.outlook.mode,
           clientId: cfg.outlook.clientId ?? null,
           clientIdSet: Boolean(cfg.outlook.clientId),
-          imapEmail: cfg.outlook.imapEmail ?? null,
-          imapConfigured: outlookImapConfigured,
           oauthConnected: outlookOauthConnected,
+          imapAccounts,
         },
       },
     });
   });
 
+  // ---- OTP ---------------------------------------------------------------
   app.get("/v1/otp/latest", (req, res) => {
+    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
     const maxAgeSec = Number(req.query.max_age ?? "120");
     const maxAgeMs = Number.isFinite(maxAgeSec) ? Math.max(1, Math.min(600, Math.floor(maxAgeSec))) * 1000 : 120_000;
     const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
+    const account = typeof req.query.account === "string" ? req.query.account : undefined;
     const providers = parseProviders(typeof req.query.providers === "string" ? req.query.providers : undefined);
-    const item = store.latest({ providers, maxAgeMs, domain });
+    const item = store.latest({ userId, providers, account, maxAgeMs, domain });
     res.json({ ok: true, item });
   });
 
   app.post("/v1/otp/consume", (req, res) => {
+    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
     const Body = z.object({ id: z.string().min(8) });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    const ok = store.consume(body.data.id);
+    const ok = store.consume(body.data.id, userId);
     res.json({ ok });
   });
 
-  app.get("/v1/otp/list", (_req, res) => {
-    res.json({ ok: true, items: store.list(20) });
+  app.get("/v1/otp/list", (req, res) => {
+    const userId = MULTI_TENANT ? String(req.userId) : LOCAL_USER_ID;
+    res.json({ ok: true, items: store.list(20, userId) });
   });
 
-  // QQ
+  // ---- QQ ----------------------------------------------------------------
   app.post("/v1/qq/config", async (req, res) => {
     const Body = z.object({ email: z.string().email(), authCode: z.string().min(4) });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    const { email, authCode } = body.data;
-    await secretSet(`qq:${email}`, authCode);
-    await mgr.updateConfig((c) => {
-      c.qq.email = email;
-    });
+    const mgr = await mgrFor(req);
+    await secretSet(mgr.secretKeyFor("qq", body.data.email), body.data.authCode);
+    await mgr.addQqAccount(body.data.email);
     res.json({ ok: true });
   });
 
-  app.post("/v1/qq/clear", async (_req, res) => {
+  app.post("/v1/qq/remove", async (req, res) => {
+    const Body = z.object({ email: z.string().email() });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    await mgr.removeQqAccount(body.data.email);
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/qq/clear", async (req, res) => {
+    const mgr = await mgrFor(req);
     await mgr.clearQq();
     res.json({ ok: true });
   });
 
-  // Reveal a stored secret in plaintext so the options page can pre-fill it.
-  // Security: returns sensitive credentials. Already gated by the client header
-  // + optional API key middleware; intended for the local single-user setup.
+  // ---- reveal secret -----------------------------------------------------
   app.post("/v1/secret/reveal", async (req, res) => {
-    const Body = z.object({ kind: z.enum(["qq", "outlook_imap"]) });
+    const Body = z.object({
+      kind: z.enum(["qq", "outlook_imap"]),
+      email: z.string().email(),
+    });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    const cfg = mgr.config;
-    let value: string | null = null;
-    if (body.data.kind === "qq") {
-      if (cfg.qq.email) value = await secretGet(`qq:${cfg.qq.email}`);
-    } else if (cfg.outlook.imapEmail) {
-      value = await secretGet(`outlook_imap:${cfg.outlook.imapEmail}`);
-    }
+    const mgr = await mgrFor(req);
+    const value = await secretGet(mgr.secretKeyFor(body.data.kind, body.data.email));
     res.json({ ok: true, value: value ?? null });
   });
 
-  // Outlook config (OAuth or IMAP)
+  // ---- Outlook -----------------------------------------------------------
   app.post("/v1/outlook/config", async (req, res) => {
     const Body = z.discriminatedUnion("mode", [
       z.object({ mode: z.literal("oauth"), clientId: z.string().min(8) }),
@@ -125,6 +252,7 @@ export async function startServer() {
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
     const data = body.data;
+    const mgr = await mgrFor(req);
 
     if (data.mode === "oauth") {
       await mgr.updateConfig((c) => {
@@ -135,15 +263,22 @@ export async function startServer() {
       return;
     }
 
-    await secretSet(`outlook_imap:${data.email}`, data.appPassword);
-    await mgr.updateConfig((c) => {
-      c.outlook.mode = "imap";
-      c.outlook.imapEmail = data.email;
-    });
+    await secretSet(mgr.secretKeyFor("outlook_imap", data.email), data.appPassword);
+    await mgr.addOutlookImapAccount(data.email);
     res.json({ ok: true });
   });
 
-  app.post("/v1/outlook/clear", async (_req, res) => {
+  app.post("/v1/outlook/imap/remove", async (req, res) => {
+    const Body = z.object({ email: z.string().email() });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    await mgr.removeOutlookImapAccount(body.data.email);
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/outlook/clear", async (req, res) => {
+    const mgr = await mgrFor(req);
     await mgr.getOutlookOAuth().clearAuth();
     await mgr.clearOutlookImap();
     await mgr.updateConfig((c) => {
@@ -153,8 +288,9 @@ export async function startServer() {
     res.json({ ok: true });
   });
 
-  app.post("/v1/outlook/auth/start", async (_req, res) => {
+  app.post("/v1/outlook/auth/start", async (req, res) => {
     try {
+      const mgr = await mgrFor(req);
       const dc = await mgr.getOutlookOAuth().startDeviceCode();
       res.json({ ok: true, deviceCode: dc });
     } catch (e) {
@@ -162,8 +298,9 @@ export async function startServer() {
     }
   });
 
-  app.post("/v1/outlook/auth/poll", async (_req, res) => {
+  app.post("/v1/outlook/auth/poll", async (req, res) => {
     try {
+      const mgr = await mgrFor(req);
       const r = await mgr.getOutlookOAuth().pollDeviceCodeOnce();
       await mgr.reconcile();
       res.json({ ok: true, result: r });
@@ -174,8 +311,11 @@ export async function startServer() {
 
   const server = app.listen(AGENT_PORT, AGENT_HOST, () => {
     // eslint-disable-next-line no-console
-    console.log(`[otp-agent] listening on http://${AGENT_HOST}:${AGENT_PORT}`);
+    console.log(
+      `[otp-agent] listening on http://${AGENT_HOST}:${AGENT_PORT}` +
+        (MULTI_TENANT ? " (multi-tenant)" : "")
+    );
   });
 
-  return { app, server, store, mgr };
+  return { app, server, store, registry };
 }

@@ -1,8 +1,7 @@
 import { extractBestOtp } from "../otp/extract.js";
 import type { OtpStore } from "../otp/store.js";
+import { scopedKey } from "../http/auth.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
-
-const KC_OUTLOOK_REFRESH = "outlook_oauth:refresh";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -32,6 +31,8 @@ function formEncode(obj: Record<string, string>): string {
 
 export class OutlookOAuthProvider {
   private store: OtpStore;
+  private userId: string;
+  private refreshKey: string;
   private clientId: string | null = null;
   private running = false;
   private pollTimer: NodeJS.Timeout | null = null;
@@ -44,8 +45,11 @@ export class OutlookOAuthProvider {
 
   private deviceCode: { value: string; intervalSec: number; expiresAt: number } | null = null;
 
-  constructor(store: OtpStore) {
+  constructor(store: OtpStore, userId: string = "local") {
     this.store = store;
+    this.userId = userId;
+    // Per-user refresh-token key so multi-tenant users don't share OAuth state.
+    this.refreshKey = scopedKey(userId, "outlook_oauth:refresh");
   }
 
   status() {
@@ -64,7 +68,7 @@ export class OutlookOAuthProvider {
   }
 
   async hasRefreshToken(): Promise<boolean> {
-    const rt = await secretGet(KC_OUTLOOK_REFRESH);
+    const rt = await secretGet(this.refreshKey);
     return Boolean(rt);
   }
 
@@ -74,7 +78,7 @@ export class OutlookOAuthProvider {
   }
 
   async clearAuth(): Promise<void> {
-    await secretDelete(KC_OUTLOOK_REFRESH);
+    await secretDelete(this.refreshKey);
     this.accessToken = null;
     this.deviceCode = null;
   }
@@ -130,7 +134,7 @@ export class OutlookOAuthProvider {
     }
 
     const tok = json as TokenResponse;
-    if (tok.refresh_token) await secretSet(KC_OUTLOOK_REFRESH, tok.refresh_token);
+    if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
     this.deviceCode = null;
     return { status: "success", token: { expiresIn: tok.expires_in } };
@@ -153,7 +157,7 @@ export class OutlookOAuthProvider {
     if (!this.clientId) throw new Error("OUTLOOK_CLIENT_ID_NOT_SET");
     if (this.accessToken && Date.now() < this.accessToken.expiresAt - 30_000) return this.accessToken.value;
 
-    const refresh = await secretGet(KC_OUTLOOK_REFRESH);
+    const refresh = await secretGet(this.refreshKey);
     if (!refresh) throw new Error("OUTLOOK_NOT_CONNECTED");
 
     const url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
@@ -173,7 +177,7 @@ export class OutlookOAuthProvider {
       throw new Error(`refresh_failed:${res.status}:${String((json as any).error || "")}`);
     }
     const tok = json as TokenResponse;
-    if (tok.refresh_token) await secretSet(KC_OUTLOOK_REFRESH, tok.refresh_token);
+    if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
     return tok.access_token;
   }
@@ -210,8 +214,10 @@ export class OutlookOAuthProvider {
 
         this.store.add({
           provider: "outlook",
+          userId: this.userId,
           code: best.code,
           receivedAt,
+          ttlSec: best.ttlSec,
           from: from || undefined,
           subject: subject || undefined,
           messageId: id,

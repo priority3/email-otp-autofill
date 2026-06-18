@@ -9,3 +9,8 @@
 
 # Docker volume data (config + secrets)
 /data/
+
+# Local env (secrets/keys) — never commit. Use .env.example as the template.
+.env
+*.env
+!.env.example

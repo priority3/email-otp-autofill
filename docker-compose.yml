@@ -9,6 +9,12 @@ services:
       OTP_AGENT_PORT: 17373
       OTP_AGENT_DATA_DIR: /data
       OTP_AGENT_API_KEY: ${OTP_AGENT_API_KEY:-}
+      # Master key for at-rest encryption of email credentials. REQUIRED for any
+      # networked deployment — without it secrets.json is stored in plaintext.
+      OTP_AGENT_MASTER_KEY: ${OTP_AGENT_MASTER_KEY:-}
+      # Set to true for the public multi-tenant instance (login + per-user
+      # isolation). Leave unset/false for a single-user self-hosted instance.
+      OTP_AGENT_MULTI_TENANT: ${OTP_AGENT_MULTI_TENANT:-}
     volumes:
       - ./data:/data
     ports:

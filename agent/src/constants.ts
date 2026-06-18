@@ -16,6 +16,15 @@ export const CLIENT_HEADER_VALUE = APP_ID;
 export const API_KEY_HEADER_NAME = "x-otp-agent-key";
 export const API_KEY = process.env.OTP_AGENT_API_KEY?.trim() || "";
 
+// Master key for at-rest encryption of file-stored secrets (non-macOS / Docker).
+// NEVER written to disk; a leaked secrets.json is useless without it.
+export const MASTER_KEY = process.env.OTP_AGENT_MASTER_KEY?.trim() || "";
+
+// Multi-tenant mode: when on, the agent requires login and isolates all data by
+// userId (for a public/shared instance). When off (default), it runs as a
+// single-user self-hosted instance (implicit "local" user, no login).
+export const MULTI_TENANT = /^(1|true|yes)$/i.test(process.env.OTP_AGENT_MULTI_TENANT?.trim() || "");
+
 const HOME = process.env.HOME?.trim() || "/tmp";
 
 export const DATA_DIR =

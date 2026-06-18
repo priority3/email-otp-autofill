@@ -4,9 +4,12 @@ export type ProviderId = "qq" | "outlook";
 
 export type OtpItem = {
   id: string;
+  userId?: string; // owning user (multi-tenant); defaults to "local"
   provider: ProviderId;
+  account?: string; // the mailbox that received this code (multi-account)
   code: string;
   receivedAt: number; // epoch ms
+  ttlSec?: number; // validity window parsed from the email body, if stated
   from?: string;
   subject?: string;
   messageId?: string;
@@ -14,7 +17,9 @@ export type OtpItem = {
 };
 
 export type LatestQuery = {
+  userId?: string; // restrict to one user's items (multi-tenant)
   providers?: ProviderId[];
+  account?: string; // optional exact-match on the receiving mailbox
   maxAgeMs: number;
   domain?: string;
 };
@@ -24,11 +29,15 @@ export class OtpStore {
   private seenMessageKeys = new Set<string>();
 
   add(input: Omit<OtpItem, "id">): OtpItem {
+    // Reason: include user + account so the same message id arriving for two
+    // different users/mailboxes is not collapsed into one.
+    const uid = input.userId ?? "local";
+    const acct = input.account ?? "";
     const messageKey = input.messageId
-      ? `${input.provider}:${input.messageId}`
-      : `${input.provider}:${input.code}:${input.receivedAt}`;
+      ? `${uid}:${input.provider}:${acct}:${input.messageId}`
+      : `${uid}:${input.provider}:${acct}:${input.code}:${input.receivedAt}`;
     if (this.seenMessageKeys.has(messageKey)) {
-      return this.items.find((x) => x.messageId && `${x.provider}:${x.messageId}` === messageKey) ?? {
+      return this.items.find((x) => x.messageId && `${x.userId ?? "local"}:${x.provider}:${x.account ?? ""}:${x.messageId}` === messageKey) ?? {
         ...input,
         id: crypto.randomUUID(),
       };
@@ -45,28 +54,37 @@ export class OtpStore {
     return item;
   }
 
-  consume(id: string): boolean {
+  consume(id: string, userId?: string): boolean {
     const it = this.items.find((x) => x.id === id);
     if (!it) return false;
+    // In multi-tenant mode, only the owning user may consume their item.
+    if (userId && (it.userId ?? "local") !== userId) return false;
     if (it.consumedAt) return true;
     it.consumedAt = Date.now();
     return true;
   }
 
-  list(limit = 20): OtpItem[] {
-    return this.items.slice(0, limit);
+  list(limit = 20, userId?: string): OtpItem[] {
+    const items = userId ? this.items.filter((it) => (it.userId ?? "local") === userId) : this.items;
+    return items.slice(0, limit);
   }
 
   latest(q: LatestQuery): OtpItem | null {
     const now = Date.now();
     const providers = q.providers?.length ? new Set(q.providers) : null;
     const domain = q.domain?.toLowerCase();
+    const account = q.account?.toLowerCase();
 
     let best: { item: OtpItem; score: number } | null = null;
     for (const it of this.items) {
+      if (q.userId && (it.userId ?? "local") !== q.userId) continue;
       if (providers && !providers.has(it.provider)) continue;
+      if (account && (it.account ?? "").toLowerCase() !== account) continue;
       if (it.consumedAt) continue;
-      if (now - it.receivedAt > q.maxAgeMs) continue;
+      // Validity window: the email-stated TTL wins; otherwise the caller's
+      // maxAgeMs applies. Keeps a 5-minute code available for its full window.
+      const windowMs = it.ttlSec && it.ttlSec > 0 ? it.ttlSec * 1000 : q.maxAgeMs;
+      if (now - it.receivedAt > windowMs) continue;
 
       let score = 0;
       // newer is better
