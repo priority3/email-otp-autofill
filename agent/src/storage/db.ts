@@ -35,7 +35,30 @@ db.exec(`
     user_id TEXT PRIMARY KEY,
     json    TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS invites (
+    code       TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL,
+    used_by    TEXT,            -- userId; NULL = unused
+    used_at    INTEGER,
+    note       TEXT
+  );
 `);
+
+// Additive column migrations for existing DBs. ALTER fails if the column
+// already exists — swallow that case so it's a no-op on subsequent startups.
+function addColumnIfMissing(table: string, columnDef: string): void {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch {
+    // column already exists — ignore
+  }
+}
+addColumnIfMissing("users", "invite_code TEXT"); // invite used at registration
+addColumnIfMissing("users", "last_seen INTEGER"); // activity tracking
 
 // One-time import of legacy JSON files into the DB. Runs only when the relevant
 // table is still empty, so it's safe to call on every startup. Preserves the

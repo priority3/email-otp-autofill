@@ -25,6 +25,10 @@ export const MASTER_KEY = process.env.OTP_AGENT_MASTER_KEY?.trim() || "";
 // single-user self-hosted instance (implicit "local" user, no login).
 export const MULTI_TENANT = /^(1|true|yes)$/i.test(process.env.OTP_AGENT_MULTI_TENANT?.trim() || "");
 
+// Admin token for the /admin panel + /v1/admin/* API. When unset, the admin
+// surface is disabled (returns 401).
+export const ADMIN_TOKEN = process.env.OTP_ADMIN_TOKEN?.trim() || "";
+
 const HOME = process.env.HOME?.trim() || "/tmp";
 
 export const DATA_DIR =

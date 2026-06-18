@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 
+import { ADMIN_TOKEN } from "../constants.js";
+import { db } from "../storage/db.js";
+
 /*
  * Minimal session auth for multi-tenant mode. Opaque bearer tokens are kept in
  * memory (re-login after a restart) — no JWT secret to manage. Tokens are sent
@@ -75,5 +78,38 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     return;
   }
   req.userId = userId;
+  touchLastSeen(userId);
+  next();
+}
+
+// Update users.last_seen, throttled to avoid a write on every request.
+const lastSeenCache = new Map<string, number>();
+const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
+function touchLastSeen(userId: string): void {
+  const now = Date.now();
+  const prev = lastSeenCache.get(userId) || 0;
+  if (now - prev < LAST_SEEN_THROTTLE_MS) return;
+  lastSeenCache.set(userId, now);
+  try {
+    db.prepare("UPDATE users SET last_seen = ? WHERE id = ?").run(now, userId);
+  } catch {
+    // best-effort; never block the request on stats
+  }
+}
+
+// Require the admin token (env OTP_ADMIN_TOKEN) for the /v1/admin/* surface.
+// Disabled entirely (401) when no token is configured.
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!ADMIN_TOKEN) {
+    res.status(401).json({ ok: false, error: "admin_disabled" });
+    return;
+  }
+  const token = bearerToken(req) || "";
+  const a = Buffer.from(token);
+  const b = Buffer.from(ADMIN_TOKEN);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
+    return;
+  }
   next();
 }

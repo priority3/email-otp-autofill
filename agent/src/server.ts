@@ -1,4 +1,6 @@
 import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import express from "express";
 import { z } from "zod";
@@ -9,14 +11,24 @@ import {
   LOCAL_USER_ID,
   createSession,
   destroySession,
+  requireAdmin,
   requireAuth,
   resolveSession,
 } from "./http/auth.js";
 import { OtpStore } from "./otp/store.js";
 import { ProviderManager, ProviderRegistry } from "./providers/manager.js";
-import { migrateJsonToDb } from "./storage/db.js";
+import { db, migrateJsonToDb } from "./storage/db.js";
 import { migratePlaintextSecrets, secretGet, secretSet } from "./storage/secrets.js";
 import { createUser, findByUsername, getUser, listUserIds, verifyPassword } from "./storage/users.js";
+import {
+  createInvites,
+  consumeInvite,
+  inviteStats,
+  isInviteUsable,
+  listInvites,
+  revokeInvite,
+} from "./storage/invites.js";
+import { isInviteRequired, setInviteRequired } from "./storage/settings.js";
 
 function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefined {
   if (!raw) return undefined;
@@ -82,11 +94,30 @@ export async function startServer() {
       password: z.string().min(8).max(200),
     });
 
+    const RegBody = Creds.extend({ inviteCode: z.string().trim().optional() });
+
     app.post("/v1/auth/register", async (req, res) => {
-      const body = Creds.safeParse(req.body);
+      const body = RegBody.safeParse(req.body);
       if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+
+      const code = (body.data.inviteCode || "").toUpperCase();
+      // Pre-check the invite when required; the actual claim happens after the
+      // user row is created (atomic consumeInvite guards against double-use).
+      if (isInviteRequired()) {
+        if (!code || !isInviteUsable(code)) {
+          return res.status(400).json({ ok: false, error: "invalid_invite" });
+        }
+      }
+
       try {
-        const user = await createUser(body.data.username, body.data.password);
+        const user = await createUser(body.data.username, body.data.password, code || undefined);
+        if (isInviteRequired()) {
+          // Claim atomically; if someone raced us to the code, roll back.
+          if (!consumeInvite(code, user.id)) {
+            db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+            return res.status(400).json({ ok: false, error: "invalid_invite" });
+          }
+        }
         await registry.getOrCreate(user.id); // empty config, ready for accounts
         const token = createSession(user.id);
         res.json({ ok: true, token, user: { id: user.id, username: user.username } });
@@ -120,11 +151,12 @@ export async function startServer() {
       res.json({ ok: true, user: { id: user.id, username: user.username } });
     });
 
-    // Gate: every /v1 route except status + auth requires a valid session.
+    // Gate: every /v1 route except status, auth, and admin requires a valid
+    // user session. Admin routes have their own requireAdmin guard.
     app.use((req, res, next) => {
       const p = req.path;
       if (!p.startsWith("/v1/")) return next();
-      if (p === "/v1/status" || p.startsWith("/v1/auth/")) return next();
+      if (p === "/v1/status" || p.startsWith("/v1/auth/") || p.startsWith("/v1/admin/")) return next();
       return requireAuth(req, res, next);
     });
   }
@@ -139,7 +171,13 @@ export async function startServer() {
       const m = /^Bearer\s+(.+)$/i.exec(h);
       const uid = m ? resolveSession(m[1]!.trim()) : null;
       if (!uid) {
-        return res.json({ ok: true, agent: { host: AGENT_HOST, port: AGENT_PORT }, multiTenant: true, authenticated: false });
+        return res.json({
+          ok: true,
+          agent: { host: AGENT_HOST, port: AGENT_PORT },
+          multiTenant: true,
+          authenticated: false,
+          requireInvite: isInviteRequired(),
+        });
       }
       userId = uid;
     }
@@ -307,6 +345,66 @@ export async function startServer() {
     } catch (e) {
       res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
     }
+  });
+
+  // ---- admin API (token-gated via requireAdmin) --------------------------
+  app.get("/v1/admin/stats", requireAdmin, (_req, res) => {
+    const now = Date.now();
+    const dayStart = now - (now % 86_400_000); // approx local-naive day bucket (UTC)
+    const week = now - 7 * 86_400_000;
+    const totalUsers = (db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number }).n;
+    const todayNew = (db.prepare("SELECT COUNT(*) AS n FROM users WHERE created_at >= ?").get(dayStart) as { n: number }).n;
+    const activ7 = (db.prepare("SELECT COUNT(*) AS n FROM users WHERE last_seen >= ?").get(week) as { n: number }).n;
+    res.json({
+      ok: true,
+      users: { total: totalUsers, todayNew, active7d: activ7 },
+      invites: inviteStats(),
+      requireInvite: isInviteRequired(),
+    });
+  });
+
+  app.get("/v1/admin/invites", requireAdmin, (_req, res) => {
+    // Attach the consumer's username for display.
+    const items = listInvites().map((iv) => {
+      let usedByName: string | null = null;
+      if (iv.usedBy) {
+        const u = db.prepare("SELECT username FROM users WHERE id = ?").get(iv.usedBy) as { username: string } | undefined;
+        usedByName = u ? u.username : iv.usedBy;
+      }
+      return { ...iv, usedByName };
+    });
+    res.json({ ok: true, items });
+  });
+
+  app.post("/v1/admin/invites", requireAdmin, (req, res) => {
+    const Body = z.object({ count: z.number().int().min(1).max(100).default(1), note: z.string().max(200).optional() });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const made = createInvites(body.data.count, body.data.note);
+    res.json({ ok: true, codes: made.map((m) => m.code) });
+  });
+
+  app.post("/v1/admin/invites/revoke", requireAdmin, (req, res) => {
+    const Body = z.object({ code: z.string().min(1) });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    res.json({ ok: revokeInvite(body.data.code.toUpperCase()) });
+  });
+
+  app.post("/v1/admin/settings", requireAdmin, (req, res) => {
+    const Body = z.object({ requireInvite: z.boolean() });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    setInviteRequired(body.data.requireInvite);
+    res.json({ ok: true, requireInvite: isInviteRequired() });
+  });
+
+  // ---- admin static page -------------------------------------------------
+  // Served from agent/admin/index.html (../admin relative to this module, both
+  // in tsx/src and compiled dist). Browser-opened, so no client-header gate.
+  const adminDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../admin");
+  app.get("/admin", (_req, res) => {
+    res.sendFile(path.join(adminDir, "index.html"));
   });
 
   const server = app.listen(AGENT_PORT, AGENT_HOST, () => {

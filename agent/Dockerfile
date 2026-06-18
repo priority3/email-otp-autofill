@@ -19,6 +19,8 @@ ENV NODE_ENV=production
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+# Admin panel static page (served by the agent at /admin → ../admin/index.html)
+COPY admin ./admin
 
 EXPOSE 17373
 CMD ["node", "dist/index.js"]

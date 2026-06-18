@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OTP Agent · 管理端</title>
+    <style>
+      :root {
+        --bg: #0a0b0f;
+        --panel: rgba(255, 255, 255, 0.045);
+        --panel-2: rgba(255, 255, 255, 0.03);
+        --border: rgba(255, 255, 255, 0.09);
+        --text: rgba(255, 255, 255, 0.94);
+        --muted: rgba(255, 255, 255, 0.6);
+        --faint: rgba(255, 255, 255, 0.4);
+        --accent: #7cf2c9;
+        --accent-strong: #5fe6b6;
+        --accent-ink: #052b20;
+        --accent-soft: rgba(124, 242, 201, 0.12);
+        --accent-glow: rgba(124, 242, 201, 0.32);
+        --danger: #ff7a7a;
+        --ok: #58e08f;
+        --radius: 10px;
+        --radius-lg: 16px;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; color: var(--text); background: var(--bg);
+        font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        background-image: radial-gradient(120% 80% at 50% -10%, var(--accent-soft), transparent 60%);
+        background-attachment: fixed; min-height: 100vh;
+      }
+      main { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+      .card {
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border: 1px solid var(--border); border-radius: var(--radius-lg);
+        padding: 16px 18px; margin-bottom: 16px;
+        backdrop-filter: blur(14px) saturate(140%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 14px rgba(0,0,0,0.3);
+      }
+      .card h2 { font-size: 14px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+      label { display: block; margin: 12px 0 6px; color: var(--muted); font-size: 12px; font-weight: 550; }
+      input, select {
+        width: 100%; box-sizing: border-box; border: 1px solid var(--border);
+        background: rgba(0,0,0,0.22); color: var(--text); border-radius: var(--radius);
+        padding: 9px 11px; outline: none; font: inherit;
+      }
+      input:focus { border-color: var(--accent-glow); box-shadow: 0 0 0 3px var(--accent-soft); }
+      button {
+        font: inherit; font-weight: 550; border: 1px solid var(--border);
+        background: rgba(255,255,255,0.05); color: var(--text); border-radius: var(--radius);
+        padding: 9px 14px; cursor: pointer; transition: background .15s, border-color .15s;
+      }
+      button:hover { background: rgba(255,255,255,0.09); }
+      button.primary {
+        border-color: transparent; color: var(--accent-ink);
+        background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+      }
+      button.danger { color: var(--danger); border-color: rgba(255,122,122,0.35); background: rgba(255,122,122,0.1); }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .msg { font-size: 12px; color: var(--muted); }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+      .stat { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+      .stat .n { font-size: 24px; font-weight: 650; }
+      .stat .l { color: var(--faint); font-size: 12px; margin-top: 2px; }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+      th { color: var(--faint); font-weight: 550; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+      td.code { font-family: ui-monospace, Menlo, monospace; letter-spacing: 1px; }
+      .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 550; }
+      .pill.used { color: var(--faint); background: rgba(255,255,255,0.05); border: 1px solid var(--border); }
+      .pill.free { color: var(--ok); background: rgba(88,224,143,0.1); border: 1px solid rgba(88,224,143,0.3); }
+      /* toggle switch */
+      .switch { position: relative; display: inline-block; width: 46px; height: 26px; }
+      .switch input { display: none; }
+      .slider { position: absolute; inset: 0; background: rgba(255,255,255,0.12); border-radius: 999px; transition: .2s; cursor: pointer; }
+      .slider::before { content: ""; position: absolute; height: 20px; width: 20px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+      .switch input:checked + .slider { background: var(--accent); }
+      .switch input:checked + .slider::before { transform: translateX(20px); }
+      .hidden { display: none !important; }
+      a.copy { color: var(--accent); cursor: pointer; font-size: 12px; }
+      .login-wrap { max-width: 380px; margin: 60px auto 0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>🛡️ OTP Agent 管理端</h1>
+      <div class="sub" id="subline">邀请码与用户管理</div>
+
+      <!-- login -->
+      <div id="loginCard" class="card login-wrap">
+        <h2>🔑 管理员登录</h2>
+        <label for="token">Admin Token</label>
+        <input id="token" type="password" placeholder="OTP_ADMIN_TOKEN" />
+        <div class="row" style="margin-top:14px;">
+          <button class="primary" id="loginBtn">登录</button>
+          <span class="msg" id="loginMsg"></span>
+        </div>
+      </div>
+
+      <!-- dashboard -->
+      <div id="dash" class="hidden">
+        <div class="card">
+          <h2>📊 概览</h2>
+          <div class="stats" id="stats"></div>
+        </div>
+
+        <div class="card">
+          <h2>⚙️ 注册设置</h2>
+          <div class="row" style="justify-content:space-between;">
+            <div>
+              <div>注册需要邀请码</div>
+              <div class="msg">开启后，新用户必须填写有效邀请码才能注册。</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="reqInvite" /><span class="slider"></span></label>
+          </div>
+          <div class="msg" id="settingsMsg" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="card">
+          <h2>🎟️ 邀请码</h2>
+          <div class="row">
+            <input id="genCount" type="number" min="1" max="100" value="5" style="width:90px;" />
+            <input id="genNote" placeholder="备注（可选）" style="flex:1; min-width:140px;" />
+            <button class="primary" id="genBtn">批量生成</button>
+            <button id="logoutBtn">退出</button>
+          </div>
+          <div class="msg" id="genMsg" style="margin-top:8px;"></div>
+          <table id="inviteTable">
+            <thead><tr><th>邀请码</th><th>状态</th><th>使用者</th><th>备注</th><th>创建时间</th><th></th></tr></thead>
+            <tbody id="inviteBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let TOKEN = sessionStorage.getItem("otp_admin_token") || "";
+
+      async function api(path, opts = {}) {
+        const res = await fetch(path, {
+          ...opts,
+          headers: {
+            "content-type": "application/json",
+            "x-otp-agent-client": "email-otp-autofill",
+            authorization: "Bearer " + TOKEN,
+            ...(opts.headers || {}),
+          },
+        });
+        if (res.status === 401) { logout(); throw new Error("unauthorized"); }
+        return res.json();
+      }
+
+      function fmtTime(ms) {
+        if (!ms) return "—";
+        const d = new Date(ms);
+        const p = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+      }
+
+      async function loadAll() {
+        const stats = await api("/v1/admin/stats");
+        $("stats").innerHTML = `
+          <div class="stat"><div class="n">${stats.users.total}</div><div class="l">用户总数</div></div>
+          <div class="stat"><div class="n">${stats.users.todayNew}</div><div class="l">今日新增</div></div>
+          <div class="stat"><div class="n">${stats.users.active7d}</div><div class="l">近 7 日活跃</div></div>
+          <div class="stat"><div class="n">${stats.invites.used}/${stats.invites.total}</div><div class="l">邀请码 已用/总</div></div>
+          <div class="stat"><div class="n">${stats.invites.unused}</div><div class="l">未使用邀请码</div></div>`;
+        $("reqInvite").checked = !!stats.requireInvite;
+        await loadInvites();
+      }
+
+      async function loadInvites() {
+        const r = await api("/v1/admin/invites");
+        $("inviteBody").innerHTML = (r.items || []).map((iv) => {
+          const used = !!iv.usedBy;
+          const pill = used ? '<span class="pill used">已用</span>' : '<span class="pill free">未用</span>';
+          const act = used ? "" : `<button class="danger" data-revoke="${iv.code}" style="padding:4px 9px;font-size:12px;">撤销</button>`;
+          const copy = `<a class="copy" data-copy="${iv.code}">复制</a>`;
+          return `<tr>
+            <td class="code">${iv.code} ${copy}</td>
+            <td>${pill}</td>
+            <td>${iv.usedByName || "—"}</td>
+            <td>${iv.note || "—"}</td>
+            <td>${fmtTime(iv.createdAt)}</td>
+            <td>${act}</td></tr>`;
+        }).join("");
+      }
+
+      function show(dash) {
+        $("loginCard").classList.toggle("hidden", dash);
+        $("dash").classList.toggle("hidden", !dash);
+      }
+
+      function logout() {
+        TOKEN = ""; sessionStorage.removeItem("otp_admin_token"); show(false);
+      }
+
+      async function login() {
+        TOKEN = $("token").value.trim();
+        if (!TOKEN) return;
+        $("loginMsg").textContent = "验证中…";
+        try {
+          await api("/v1/admin/stats");
+          sessionStorage.setItem("otp_admin_token", TOKEN);
+          $("loginMsg").textContent = "";
+          show(true); await loadAll();
+        } catch {
+          $("loginMsg").textContent = "Token 无效";
+        }
+      }
+
+      $("loginBtn").addEventListener("click", login);
+      $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+      $("logoutBtn").addEventListener("click", logout);
+
+      $("reqInvite").addEventListener("change", async () => {
+        $("settingsMsg").textContent = "保存中…";
+        try {
+          await api("/v1/admin/settings", { method: "POST", body: JSON.stringify({ requireInvite: $("reqInvite").checked }) });
+          $("settingsMsg").textContent = "已保存。" + ($("reqInvite").checked ? "新用户需邀请码。" : "新用户无需邀请码。");
+        } catch { $("settingsMsg").textContent = "保存失败"; }
+      });
+
+      $("genBtn").addEventListener("click", async () => {
+        const count = Math.max(1, Math.min(100, Number($("genCount").value) || 1));
+        const note = $("genNote").value.trim();
+        $("genMsg").textContent = "生成中…";
+        try {
+          const r = await api("/v1/admin/invites", { method: "POST", body: JSON.stringify({ count, note: note || undefined }) });
+          $("genMsg").textContent = `已生成 ${r.codes.length} 个邀请码。`;
+          $("genNote").value = "";
+          await loadAll();
+        } catch { $("genMsg").textContent = "生成失败"; }
+      });
+
+      // delegate copy / revoke
+      $("inviteBody").addEventListener("click", async (e) => {
+        const c = e.target.getAttribute("data-copy");
+        if (c) { navigator.clipboard.writeText(c); e.target.textContent = "已复制"; setTimeout(() => (e.target.textContent = "复制"), 1200); return; }
+        const rv = e.target.getAttribute("data-revoke");
+        if (rv && confirm(`撤销邀请码 ${rv}？`)) {
+          await api("/v1/admin/invites/revoke", { method: "POST", body: JSON.stringify({ code: rv }) });
+          await loadAll();
+        }
+      });
+
+      // auto-login if a token is cached
+      if (TOKEN) { login(); }
+    </script>
+  </body>
+</html>

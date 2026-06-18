@@ -1,0 +1,31 @@
+import { db } from "./db.js";
+
+/*
+ * Key/value app settings stored in the `settings` table. Currently holds the
+ * "require invite code to register" toggle, switchable live from the admin page.
+ */
+
+export function getSetting(key: string, fallback: string): string {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row ? row.value : fallback;
+}
+
+export function setSetting(key: string, value: string): void {
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run(key, value);
+}
+
+const REQUIRE_INVITE_KEY = "require_invite";
+
+// Default false: a fresh instance must allow registration so the first user
+// (and the admin) can get in before any invite codes exist.
+export function isInviteRequired(): boolean {
+  return getSetting(REQUIRE_INVITE_KEY, "0") === "1";
+}
+
+export function setInviteRequired(on: boolean): void {
+  setSetting(REQUIRE_INVITE_KEY, on ? "1" : "0");
+}

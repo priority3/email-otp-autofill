@@ -61,7 +61,9 @@ export async function listUserIds(): Promise<string[]> {
 }
 
 // Create a user. Throws "username_taken" if the (normalized) name exists.
-export async function createUser(username: string, password: string): Promise<User> {
+// `inviteCode` is recorded for traceability (already validated/consumed by the
+// caller when invites are required).
+export async function createUser(username: string, password: string, inviteCode?: string): Promise<User> {
   const user: User = {
     id: crypto.randomUUID(),
     username: normUsername(username),
@@ -70,8 +72,8 @@ export async function createUser(username: string, password: string): Promise<Us
   };
   try {
     db.prepare(
-      "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)"
-    ).run(user.id, user.username, user.passwordHash, user.createdAt);
+      "INSERT INTO users (id, username, password_hash, created_at, invite_code) VALUES (?, ?, ?, ?, ?)"
+    ).run(user.id, user.username, user.passwordHash, user.createdAt, inviteCode ?? null);
   } catch (e) {
     // UNIQUE constraint on username.
     if (String((e as any)?.message || e).includes("UNIQUE")) throw new Error("username_taken");

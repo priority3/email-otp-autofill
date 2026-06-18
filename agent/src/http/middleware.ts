@@ -37,8 +37,9 @@ export function noStore(_req: Request, res: Response, next: NextFunction) {
 }
 
 export function requireClientHeader(req: Request, res: Response, next: NextFunction) {
-  // Allow health checks without the header.
-  if (req.path === "/v1/status") return next();
+  // Allow health checks and the browser-opened admin page without the header.
+  // (/v1/admin/* APIs still require the admin token via requireAdmin.)
+  if (req.path === "/v1/status" || req.path === "/admin") return next();
 
   const v = req.headers[CLIENT_HEADER_NAME] ?? req.headers[CLIENT_HEADER_NAME.toLowerCase()];
   const value = Array.isArray(v) ? v[0] : v;
