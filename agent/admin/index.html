@@ -24,15 +24,16 @@
         --radius-lg: 16px;
       }
       * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0; color: var(--text); background: var(--bg);
         font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
         background-image: radial-gradient(120% 80% at 50% -10%, var(--accent-soft), transparent 60%);
-        background-attachment: fixed; min-height: 100vh;
+        background-attachment: fixed;
       }
-      main { max-width: 860px; margin: 0 auto; padding: 28px 20px 60px; }
+      main { max-width: 980px; margin: 0 auto; padding: 24px 20px 28px; display: flex; flex-direction: column; min-height: 100vh; }
       h1 { font-size: 18px; margin: 0 0 4px; }
-      .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+      .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
       .card {
         background: linear-gradient(180deg, var(--panel), var(--panel-2));
         border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -61,17 +62,28 @@
       button.danger { color: var(--danger); border-color: rgba(255,122,122,0.35); background: rgba(255,122,122,0.1); }
       .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
       .msg { font-size: 12px; color: var(--muted); }
-      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
-      .stat { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
-      .stat .n { font-size: 24px; font-weight: 650; }
+      .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; }
+      .stat { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: var(--radius); padding: 11px 13px; }
+      .stat .n { font-size: 22px; font-weight: 650; }
       .stat .l { color: var(--faint); font-size: 12px; margin-top: 2px; }
-      table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
-      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-      th { color: var(--faint); font-weight: 550; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+
+      /* table inside a fixed-height scroll area with sticky header */
+      .table-scroll { max-height: 52vh; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+      table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+      td.wrap { white-space: normal; }
+      thead th {
+        position: sticky; top: 0; z-index: 1;
+        background: #14161d; color: var(--faint); font-weight: 550; font-size: 11px;
+        text-transform: uppercase; letter-spacing: .4px;
+      }
+      tbody tr:hover { background: rgba(255,255,255,0.03); }
+      tbody tr.empty td { color: var(--faint); text-align: center; padding: 24px; }
       td.code { font-family: ui-monospace, Menlo, monospace; letter-spacing: 1px; }
       .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 550; }
       .pill.used { color: var(--faint); background: rgba(255,255,255,0.05); border: 1px solid var(--border); }
       .pill.free { color: var(--ok); background: rgba(88,224,143,0.1); border: 1px solid rgba(88,224,143,0.3); }
+      .pill.off { color: var(--danger); background: rgba(255,122,122,0.1); border: 1px solid rgba(255,122,122,0.3); }
       /* toggle switch */
       .switch { position: relative; display: inline-block; width: 46px; height: 26px; }
       .switch input { display: none; }
@@ -82,13 +94,27 @@
       .hidden { display: none !important; }
       a.copy { color: var(--accent); cursor: pointer; font-size: 12px; }
       .login-wrap { max-width: 380px; margin: 60px auto 0; }
+
+      /* header bar: title + overview + logout sticky on top */
+      .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+
+      /* tab bar */
+      .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+      .tab {
+        padding: 8px 16px; border-radius: 999px; border: 1px solid var(--border);
+        background: transparent; color: var(--muted); font-size: 13px; font-weight: 550; cursor: pointer;
+      }
+      .tab:hover { background: rgba(255,255,255,0.05); }
+      .tab.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-glow); }
+      .tab .count { color: var(--faint); font-weight: 500; margin-left: 4px; }
+
+      .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+      .toolbar .search { flex: 1; min-width: 160px; }
+      .seg-count { color: var(--faint); font-size: 12px; }
     </style>
   </head>
   <body>
     <main>
-      <h1>🛡️ OTP Agent 管理端</h1>
-      <div class="sub" id="subline">邀请码与用户管理</div>
-
       <!-- login -->
       <div id="loginCard" class="card login-wrap">
         <h2>🔑 管理员登录</h2>
@@ -102,12 +128,69 @@
 
       <!-- dashboard -->
       <div id="dash" class="hidden">
+        <div class="topbar">
+          <div>
+            <h1>🛡️ OTP Agent 管理端</h1>
+            <div class="sub">邀请码与用户管理</div>
+          </div>
+          <button id="logoutBtn">退出</button>
+        </div>
+
+        <!-- overview (always on top) -->
         <div class="card">
           <h2>📊 概览</h2>
           <div class="stats" id="stats"></div>
         </div>
 
-        <div class="card">
+        <!-- tabs -->
+        <div class="tabs">
+          <button class="tab active" data-tab="users">👥 用户<span class="count" id="tabUsersCount"></span></button>
+          <button class="tab" data-tab="invites">🎟️ 邀请码<span class="count" id="tabInvitesCount"></span></button>
+          <button class="tab" data-tab="settings">⚙️ 设置</button>
+        </div>
+
+        <!-- tab: users -->
+        <div class="card tab-panel" data-panel="users">
+          <div class="toolbar">
+            <input id="userSearch" class="search" placeholder="搜索用户名 / 邮箱…" />
+            <span class="seg-count" id="userCount"></span>
+            <button id="refreshUsers">刷新</button>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>用户名</th><th>绑定邮箱</th><th>注册时间</th><th>最近活跃</th><th>状态</th><th></th></tr></thead>
+              <tbody id="userBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- tab: invites -->
+        <div class="card tab-panel hidden" data-panel="invites">
+          <div class="row" style="margin-bottom:12px;">
+            <input id="genCount" type="number" min="1" max="100" value="5" style="width:90px;" />
+            <input id="genNote" placeholder="备注（可选）" style="flex:1; min-width:140px;" />
+            <button class="primary" id="genBtn">批量生成</button>
+            <span class="msg" id="genMsg"></span>
+          </div>
+          <div class="toolbar">
+            <input id="inviteSearch" class="search" placeholder="搜索邀请码 / 使用者 / 备注…" />
+            <select id="inviteFilter" style="width:auto;">
+              <option value="all">全部</option>
+              <option value="free">未用</option>
+              <option value="used">已用</option>
+            </select>
+            <span class="seg-count" id="inviteCount"></span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>邀请码</th><th>状态</th><th>使用者</th><th>备注</th><th>创建时间</th><th></th></tr></thead>
+              <tbody id="inviteBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- tab: settings -->
+        <div class="card tab-panel hidden" data-panel="settings">
           <h2>⚙️ 注册设置</h2>
           <div class="row" style="justify-content:space-between;">
             <div>
@@ -118,35 +201,15 @@
           </div>
           <div class="msg" id="settingsMsg" style="margin-top:8px;"></div>
         </div>
-
-        <div class="card">
-          <h2>👥 用户</h2>
-          <table id="userTable">
-            <thead><tr><th>用户名</th><th>绑定邮箱</th><th>注册时间</th><th>最近活跃</th><th>状态</th><th></th></tr></thead>
-            <tbody id="userBody"></tbody>
-          </table>
-        </div>
-
-        <div class="card">
-          <h2>🎟️ 邀请码</h2>
-          <div class="row">
-            <input id="genCount" type="number" min="1" max="100" value="5" style="width:90px;" />
-            <input id="genNote" placeholder="备注（可选）" style="flex:1; min-width:140px;" />
-            <button class="primary" id="genBtn">批量生成</button>
-            <button id="logoutBtn">退出</button>
-          </div>
-          <div class="msg" id="genMsg" style="margin-top:8px;"></div>
-          <table id="inviteTable">
-            <thead><tr><th>邀请码</th><th>状态</th><th>使用者</th><th>备注</th><th>创建时间</th><th></th></tr></thead>
-            <tbody id="inviteBody"></tbody>
-          </table>
-        </div>
       </div>
     </main>
 
     <script>
       const $ = (id) => document.getElementById(id);
       let TOKEN = sessionStorage.getItem("otp_admin_token") || "";
+      // cached datasets for client-side filtering
+      let USERS = [];
+      let INVITES = [];
 
       async function api(path, opts = {}) {
         const res = await fetch(path, {
@@ -168,51 +231,81 @@
         const p = (n) => String(n).padStart(2, "0");
         return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
       }
+      function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
-      async function loadAll() {
-        const stats = await api("/v1/admin/stats");
+      // ---- tabs ----
+      function switchTab(name) {
+        document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
+        document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== name));
+      }
+      document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+
+      // ---- overview ----
+      async function loadStats() {
+        const s = await api("/v1/admin/stats");
         $("stats").innerHTML = `
-          <div class="stat"><div class="n">${stats.users.total}</div><div class="l">用户总数</div></div>
-          <div class="stat"><div class="n">${stats.users.todayNew}</div><div class="l">今日新增</div></div>
-          <div class="stat"><div class="n">${stats.users.active7d}</div><div class="l">近 7 日活跃</div></div>
-          <div class="stat"><div class="n">${stats.users.disabled || 0}</div><div class="l">已禁用</div></div>
-          <div class="stat"><div class="n">${stats.invites.used}/${stats.invites.total}</div><div class="l">邀请码 已用/总</div></div>`;
-        $("reqInvite").checked = !!stats.requireInvite;
-        await loadUsers();
-        await loadInvites();
+          <div class="stat"><div class="n">${s.users.total}</div><div class="l">用户总数</div></div>
+          <div class="stat"><div class="n">${s.users.todayNew}</div><div class="l">今日新增</div></div>
+          <div class="stat"><div class="n">${s.users.active7d}</div><div class="l">近 7 日活跃</div></div>
+          <div class="stat"><div class="n">${s.users.disabled || 0}</div><div class="l">已禁用</div></div>
+          <div class="stat"><div class="n">${s.invites.used}/${s.invites.total}</div><div class="l">邀请码 已用/总</div></div>
+          <div class="stat"><div class="n">${s.invites.unused}</div><div class="l">未用邀请码</div></div>`;
+        $("reqInvite").checked = !!s.requireInvite;
+        $("tabUsersCount").textContent = s.users.total ? `(${s.users.total})` : "";
+        $("tabInvitesCount").textContent = s.invites.total ? `(${s.invites.total})` : "";
       }
 
+      // ---- users ----
       const MAIL_ICON = { qq: "📩", outlook_imap: "📨", outlook_oauth: "🔑" };
       function mailboxBadges(list) {
         if (!list || !list.length) return '<span style="color:var(--faint)">—</span>';
         return list.map((m) => {
           const label = m.email || (m.type === "outlook_oauth" ? "Outlook OAuth" : m.type);
-          return `<span class="pill free" style="margin:1px 3px 1px 0;">${MAIL_ICON[m.type] || "✉️"} ${label}</span>`;
+          return `<span class="pill free" style="margin:1px 3px 1px 0;">${MAIL_ICON[m.type] || "✉️"} ${esc(label)}</span>`;
         }).join("");
       }
-
-      async function loadUsers() {
-        const r = await api("/v1/admin/users");
-        $("userBody").innerHTML = (r.items || []).map((u) => {
-          const status = u.disabled
-            ? '<span class="pill" style="color:var(--danger);background:rgba(255,122,122,0.1);border:1px solid rgba(255,122,122,0.3);">已禁用</span>'
-            : '<span class="pill free">正常</span>';
+      function renderUsers() {
+        const q = $("userSearch").value.trim().toLowerCase();
+        const rows = USERS.filter((u) => {
+          if (!q) return true;
+          const hay = (u.username + " " + (u.mailboxes || []).map((m) => m.email || "").join(" ")).toLowerCase();
+          return hay.includes(q);
+        });
+        $("userCount").textContent = `${rows.length} / ${USERS.length}`;
+        if (!rows.length) { $("userBody").innerHTML = '<tr class="empty"><td colspan="6">无匹配用户</td></tr>'; return; }
+        $("userBody").innerHTML = rows.map((u) => {
+          const status = u.disabled ? '<span class="pill off">已禁用</span>' : '<span class="pill free">正常</span>';
           const btn = u.disabled
-            ? `<button data-enable="${u.id}" data-name="${u.username}" style="padding:4px 9px;font-size:12px;">启用</button>`
-            : `<button class="danger" data-disable="${u.id}" data-name="${u.username}" style="padding:4px 9px;font-size:12px;">禁用</button>`;
+            ? `<button data-enable="${u.id}" data-name="${esc(u.username)}" style="padding:4px 9px;font-size:12px;">启用</button>`
+            : `<button class="danger" data-disable="${u.id}" data-name="${esc(u.username)}" style="padding:4px 9px;font-size:12px;">禁用</button>`;
           return `<tr>
-            <td>${u.username}</td>
-            <td>${mailboxBadges(u.mailboxes)}</td>
+            <td>${esc(u.username)}</td>
+            <td class="wrap">${mailboxBadges(u.mailboxes)}</td>
             <td>${fmtTime(u.createdAt)}</td>
             <td>${fmtTime(u.lastSeen)}</td>
             <td>${status}</td>
             <td>${btn}</td></tr>`;
         }).join("");
       }
+      async function loadUsers() {
+        const r = await api("/v1/admin/users");
+        USERS = r.items || [];
+        renderUsers();
+      }
 
-      async function loadInvites() {
-        const r = await api("/v1/admin/invites");
-        $("inviteBody").innerHTML = (r.items || []).map((iv) => {
+      // ---- invites ----
+      function renderInvites() {
+        const q = $("inviteSearch").value.trim().toLowerCase();
+        const f = $("inviteFilter").value;
+        const rows = INVITES.filter((iv) => {
+          if (f === "free" && iv.usedBy) return false;
+          if (f === "used" && !iv.usedBy) return false;
+          if (!q) return true;
+          return (iv.code + " " + (iv.usedByName || "") + " " + (iv.note || "")).toLowerCase().includes(q);
+        });
+        $("inviteCount").textContent = `${rows.length} / ${INVITES.length}`;
+        if (!rows.length) { $("inviteBody").innerHTML = '<tr class="empty"><td colspan="6">无匹配邀请码</td></tr>'; return; }
+        $("inviteBody").innerHTML = rows.map((iv) => {
           const used = !!iv.usedBy;
           const pill = used ? '<span class="pill used">已用</span>' : '<span class="pill free">未用</span>';
           const act = used ? "" : `<button class="danger" data-revoke="${iv.code}" style="padding:4px 9px;font-size:12px;">撤销</button>`;
@@ -220,22 +313,30 @@
           return `<tr>
             <td class="code">${iv.code} ${copy}</td>
             <td>${pill}</td>
-            <td>${iv.usedByName || "—"}</td>
-            <td>${iv.note || "—"}</td>
+            <td>${esc(iv.usedByName || "—")}</td>
+            <td class="wrap">${esc(iv.note || "—")}</td>
             <td>${fmtTime(iv.createdAt)}</td>
             <td>${act}</td></tr>`;
         }).join("");
       }
+      async function loadInvites() {
+        const r = await api("/v1/admin/invites");
+        INVITES = r.items || [];
+        renderInvites();
+      }
 
+      async function loadAll() {
+        await loadStats();
+        await loadUsers();
+        await loadInvites();
+      }
+
+      // ---- auth ----
       function show(dash) {
         $("loginCard").classList.toggle("hidden", dash);
         $("dash").classList.toggle("hidden", !dash);
       }
-
-      function logout() {
-        TOKEN = ""; sessionStorage.removeItem("otp_admin_token"); show(false);
-      }
-
+      function logout() { TOKEN = ""; sessionStorage.removeItem("otp_admin_token"); show(false); }
       async function login() {
         TOKEN = $("token").value.trim();
         if (!TOKEN) return;
@@ -245,14 +346,16 @@
           sessionStorage.setItem("otp_admin_token", TOKEN);
           $("loginMsg").textContent = "";
           show(true); await loadAll();
-        } catch {
-          $("loginMsg").textContent = "Token 无效";
-        }
+        } catch { $("loginMsg").textContent = "Token 无效"; }
       }
 
       $("loginBtn").addEventListener("click", login);
       $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
       $("logoutBtn").addEventListener("click", logout);
+      $("refreshUsers").addEventListener("click", loadUsers);
+      $("userSearch").addEventListener("input", renderUsers);
+      $("inviteSearch").addEventListener("input", renderInvites);
+      $("inviteFilter").addEventListener("change", renderInvites);
 
       $("reqInvite").addEventListener("change", async () => {
         $("settingsMsg").textContent = "保存中…";
@@ -268,9 +371,9 @@
         $("genMsg").textContent = "生成中…";
         try {
           const r = await api("/v1/admin/invites", { method: "POST", body: JSON.stringify({ count, note: note || undefined }) });
-          $("genMsg").textContent = `已生成 ${r.codes.length} 个邀请码。`;
+          $("genMsg").textContent = `已生成 ${r.codes.length} 个。`;
           $("genNote").value = "";
-          await loadAll();
+          await loadStats(); await loadInvites();
         } catch { $("genMsg").textContent = "生成失败"; }
       });
 
@@ -281,25 +384,24 @@
         const rv = e.target.getAttribute("data-revoke");
         if (rv && confirm(`撤销邀请码 ${rv}？`)) {
           await api("/v1/admin/invites/revoke", { method: "POST", body: JSON.stringify({ code: rv }) });
-          await loadAll();
+          await loadStats(); await loadInvites();
         }
       });
 
-      // delegate disable / enable on the users table
+      // delegate disable / enable
       $("userBody").addEventListener("click", async (e) => {
         const dis = e.target.getAttribute("data-disable");
         const en = e.target.getAttribute("data-enable");
         const name = e.target.getAttribute("data-name") || "";
         if (dis && confirm(`禁用用户「${name}」？该用户将无法登录、邮箱轮询停止（数据保留，可再启用）。`)) {
           await api("/v1/admin/users/disable", { method: "POST", body: JSON.stringify({ userId: dis, disabled: true }) });
-          await loadAll();
+          await loadStats(); await loadUsers();
         } else if (en && confirm(`启用用户「${name}」？`)) {
           await api("/v1/admin/users/disable", { method: "POST", body: JSON.stringify({ userId: en, disabled: false }) });
-          await loadAll();
+          await loadStats(); await loadUsers();
         }
       });
 
-      // auto-login if a token is cached
       if (TOKEN) { login(); }
     </script>
   </body>
