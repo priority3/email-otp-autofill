@@ -24,16 +24,53 @@ type TokenResponse = {
   id_token?: string;
 };
 
+type OAuthErrorResponse = {
+  error?: string;
+  error_description?: string;
+};
+
+const DEVICE_CODE_SCOPE = "offline_access Mail.Read User.Read openid profile email";
+const REFRESH_SCOPE = "offline_access Mail.Read";
+
 function formEncode(obj: Record<string, string>): string {
   return Object.entries(obj)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join("&");
 }
 
+function oauthError(label: string, status: number, json: unknown): string {
+  const err = typeof (json as OAuthErrorResponse)?.error === "string" ? (json as OAuthErrorResponse).error : "";
+  const desc =
+    typeof (json as OAuthErrorResponse)?.error_description === "string"
+      ? (json as OAuthErrorResponse).error_description
+      : "";
+  const detail = [err, desc].filter(Boolean).join(": ");
+  return detail ? `${label}: ${status}: ${detail}` : `${label}: ${status}`;
+}
+
+function decodeJwtPayload(token: string | undefined): Record<string, unknown> | null {
+  const payload = String(token || "").split(".")[1];
+  if (!payload) return null;
+  try {
+    return JSON.parse(Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64url").toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return null;
+  }
+}
+
+function claimString(claims: Record<string, unknown> | null, key: string): string {
+  const value = claims?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export class OutlookOAuthProvider {
   private store: OtpStore;
   private userId: string;
   private refreshKey: string;
+  private accountEmailKey: string;
   private running = false;
   private pollTimer: NodeJS.Timeout | null = null;
 
@@ -50,6 +87,7 @@ export class OutlookOAuthProvider {
     this.userId = userId;
     // Per-user refresh-token key so multi-tenant users don't share OAuth state.
     this.refreshKey = scopedKey(userId, "outlook_oauth:refresh");
+    this.accountEmailKey = scopedKey(userId, "outlook_oauth:email");
   }
 
   // Instance-wide client ID set by the admin; shared by every user's sign-in.
@@ -73,6 +111,10 @@ export class OutlookOAuthProvider {
     return Boolean(rt);
   }
 
+  async getAccountEmail(): Promise<string | null> {
+    return await secretGet(this.accountEmailKey);
+  }
+
   // For status payload only; don't block on Keychain. (macOS security calls can be slow)
   private get getRefreshTokenSyncHint(): boolean {
     return true;
@@ -80,6 +122,7 @@ export class OutlookOAuthProvider {
 
   async clearAuth(): Promise<void> {
     await secretDelete(this.refreshKey);
+    await secretDelete(this.accountEmailKey);
     this.accessToken = null;
     this.deviceCode = null;
   }
@@ -89,15 +132,16 @@ export class OutlookOAuthProvider {
     const url = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
     const body = formEncode({
       client_id: this.clientId,
-      scope: "offline_access Mail.Read",
+      scope: DEVICE_CODE_SCOPE,
     });
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
     });
-    if (!res.ok) throw new Error(`devicecode_failed: ${res.status}`);
-    const dc = (await res.json()) as DeviceCodeResponse;
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(oauthError("devicecode_failed", res.status, json));
+    const dc = json as DeviceCodeResponse;
     this.deviceCode = {
       value: dc.device_code,
       intervalSec: Math.max(1, dc.interval || 5),
@@ -131,12 +175,14 @@ export class OutlookOAuthProvider {
       const err = String((json as any).error || "authorization_pending");
       if (err === "authorization_pending" || err === "slow_down") return { status: "pending", error: err };
       if (err === "expired_token") return { status: "expired" };
-      return { status: "pending", error: err };
+      return { status: "pending", error: oauthError("devicecode_poll_failed", res.status, json) };
     }
 
     const tok = json as TokenResponse;
     if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
+    const email = await this.resolveAccountEmail(tok);
+    if (email) await secretSet(this.accountEmailKey, email);
     this.deviceCode = null;
     return { status: "success", token: { expiresIn: tok.expires_in } };
   }
@@ -166,7 +212,7 @@ export class OutlookOAuthProvider {
       client_id: this.clientId,
       grant_type: "refresh_token",
       refresh_token: refresh,
-      scope: "offline_access Mail.Read",
+      scope: REFRESH_SCOPE,
     });
     const res = await fetch(url, {
       method: "POST",
@@ -175,12 +221,36 @@ export class OutlookOAuthProvider {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(`refresh_failed:${res.status}:${String((json as any).error || "")}`);
+      throw new Error(oauthError("refresh_failed", res.status, json));
     }
     const tok = json as TokenResponse;
     if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
     return tok.access_token;
+  }
+
+  private async resolveAccountEmail(tok: TokenResponse): Promise<string | null> {
+    const idClaims = decodeJwtPayload(tok.id_token);
+    const accessClaims = decodeJwtPayload(tok.access_token);
+    const fromClaims =
+      claimString(idClaims, "email") ||
+      claimString(idClaims, "preferred_username") ||
+      claimString(idClaims, "upn") ||
+      claimString(accessClaims, "email") ||
+      claimString(accessClaims, "preferred_username") ||
+      claimString(accessClaims, "upn");
+    if (fromClaims) return fromClaims;
+
+    try {
+      const res = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
+        headers: { authorization: `Bearer ${tok.access_token}` },
+      });
+      const json = (await res.json().catch(() => ({}))) as { mail?: string; userPrincipalName?: string };
+      if (!res.ok) return null;
+      return (json.mail || json.userPrincipalName || "").trim() || null;
+    } catch {
+      return null;
+    }
   }
 
   private async pollOnce(): Promise<void> {

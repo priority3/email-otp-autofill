@@ -228,15 +228,16 @@
 
           <h2 style="margin-top:22px;">📨 Outlook OAuth</h2>
           <div class="msg" style="margin-bottom:4px;">
-            在 Azure 注册一个支持「个人 Microsoft 账户」的应用，并开启「Allow public client flows」，
-            把 Application (client) ID 填入此处。所有用户的 Outlook 授权登录共用它。
+            在 Azure 注册一个支持「个人 Microsoft 账户」的应用，把它配置为 Mobile/Desktop public client，
+            再把 Application (client) ID 填入此处。所有用户的 Outlook 授权登录共用它。
           </div>
           <div class="msg" style="margin-bottom:8px;">
             📌 获取步骤：打开
             <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener" style="color:var(--accent);">Azure 门户 · 应用注册</a>
             → New registration → Supported account types 选「Personal Microsoft accounts only」→
-            无需填 Redirect URI → 注册后复制「Application (client) ID」填入下方。
-            还需在该应用的 Authentication 页把「Allow public client flows」设为 Yes（设备码流程要求）。
+            注册后进入 Authentication → Add a platform → Mobile and desktop applications →
+            选择或填写 https://login.microsoftonline.com/common/oauth2/nativeclient →
+            将「Allow public client flows」设为 Yes → 复制「Application (client) ID」填入下方。
           </div>
           <label for="outlookClientId">Microsoft App Client ID</label>
           <input id="outlookClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
@@ -266,7 +267,9 @@
           },
         });
         if (res.status === 401) { logout(); throw new Error("unauthorized"); }
-        return res.json();
+        const data = await res.json();
+        if (!res.ok || data.ok === false) throw new Error(data.error || "request_failed");
+        return data;
       }
 
       function fmtTime(ms) {
@@ -386,7 +389,9 @@
       }
       function logout() { TOKEN = ""; localStorage.removeItem("otp_admin_token"); show(false); }
       async function login() {
-        TOKEN = $("token").value.trim();
+        const inputVal = $("token").value.trim();
+        // Reason: 自动登录时使用已存储的 TOKEN，手动登录时使用输入框的值
+        if (inputVal) TOKEN = inputVal;
         if (!TOKEN) return;
         $("loginMsg").textContent = "验证中…";
         try {
@@ -429,7 +434,9 @@
         $("clientIdMsg").textContent = "保存中…";
         try {
           const r = await api("/v1/admin/settings", { method: "POST", body: JSON.stringify({ outlookClientId }) });
-          $("clientIdMsg").textContent = r.outlookClientId ? "已保存。" : "已清空。";
+          if ((r.outlookClientId || "") !== outlookClientId) throw new Error("client_id_not_saved");
+          $("clientIdMsg").textContent = outlookClientId ? "已保存。" : "已清空。";
+          await loadStats();
           setTimeout(() => ($("clientIdMsg").textContent = ""), 2500);
         } catch { $("clientIdMsg").textContent = "保存失败"; }
       });

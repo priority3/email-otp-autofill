@@ -22,6 +22,11 @@ function setMsg(id, text) {
 let accounts = [];
 // What the right panel is currently showing.
 let selected = null; // "agent" | "add" | {type,email} | null
+let oauthPollTimer = null;
+let oauthPollDelayMs = 5000;
+let oauthPollExpiresAt = 0;
+let oauthPollInFlight = false;
+let oauthPollRunId = 0;
 
 // ---- password eye toggle (unchanged behavior) ----------------------------
 const EYE_ICON =
@@ -109,10 +114,11 @@ function renderAccountList() {
   list.innerHTML = "";
 
   for (const acc of accounts) {
+    const labelText = acc.email || (acc.type === "outlook_oauth" ? "Outlook OAuth" : "");
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "nav-item account-item";
-    btn.setAttribute("data-email", acc.email);
+    btn.setAttribute("data-email", labelText);
     btn.setAttribute("data-type", acc.type);
 
     const ic = document.createElement("span");
@@ -121,8 +127,8 @@ function renderAccountList() {
 
     const label = document.createElement("span");
     label.className = "nav-label";
-    label.textContent = acc.email;
-    label.title = acc.email;
+    label.textContent = labelText;
+    label.title = labelText;
 
     const dot = document.createElement("span");
     dot.className = "nav-dot" + (acc.configured ? " ok" : "");
@@ -169,7 +175,7 @@ function selectAccount(acc) {
 
   if (acc.type === "outlook_oauth") {
     // Outlook OAuth: show the OAuth panel with connect/clear actions
-    $("acctTitle").querySelector("span:last-child").textContent = "Outlook OAuth";
+    $("acctTitle").querySelector("span:last-child").textContent = acc.email || "Outlook OAuth";
     renderAccountFormByType("outlook_oauth");
     showPanel("panelAccount");
   } else {
@@ -470,8 +476,8 @@ async function refreshStatus() {
     for (const a of qq) next.push({ type: "qq", email: a.email, configured: !!a.configured });
     // Outlook OAuth is a single account (no email in list, just the type).
     const ol = cfg.outlook || {};
-    if (ol.clientIdSet) {
-      next.push({ type: "outlook_oauth", configured: !!ol.oauthConnected });
+    if (ol.oauthConnected) {
+      next.push({ type: "outlook_oauth", email: ol.oauthEmail || "Outlook OAuth", configured: !!ol.oauthConnected });
     }
     accounts = next;
     renderAccountList();
@@ -545,49 +551,110 @@ async function removeAccount() {
 }
 
 // ---- Outlook OAuth (now integrated in account panel) ---------------------
+function stopOauthAutoPoll() {
+  oauthPollRunId++;
+  if (oauthPollTimer) clearTimeout(oauthPollTimer);
+  oauthPollTimer = null;
+  oauthPollInFlight = false;
+  oauthPollExpiresAt = 0;
+  const start = $("outlookAuthStart");
+  if (start) start.disabled = false;
+}
+
+function scheduleOauthAutoPoll(runId, delayMs = oauthPollDelayMs) {
+  if (oauthPollTimer) clearTimeout(oauthPollTimer);
+  oauthPollTimer = setTimeout(() => void pollOutlookAuthOnce(runId), Math.max(1000, delayMs));
+}
+
+async function pollOutlookAuthOnce(runId) {
+  if (runId !== oauthPollRunId) return;
+  if (oauthPollInFlight) return;
+  if (oauthPollExpiresAt && Date.now() >= oauthPollExpiresAt) {
+    stopOauthAutoPoll();
+    setMsg("outlookOauthMsg", T("expired"));
+    await refreshStatus();
+    return;
+  }
+
+  oauthPollInFlight = true;
+  try {
+    const r = await bg({ type: "BG_OUTLOOK_AUTH_POLL" });
+    if (runId !== oauthPollRunId) return;
+    if (!r || !r.ok) {
+      stopOauthAutoPoll();
+      setMsg("outlookOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+      return;
+    }
+
+    const result = r.result;
+    if (result.status === "success") {
+      stopOauthAutoPoll();
+      setMsg("outlookOauthMsg", T("connected"));
+      await refreshStatus();
+      setTimeout(() => setMsg("outlookOauthMsg", ""), 2500);
+      return;
+    }
+    if (result.status === "expired") {
+      stopOauthAutoPoll();
+      setMsg("outlookOauthMsg", T("expired"));
+      await refreshStatus();
+      return;
+    }
+
+    if (result.error === "slow_down") oauthPollDelayMs += 5000;
+    setMsg("outlookOauthMsg", T("oauth_waiting", { sec: Math.round(oauthPollDelayMs / 1000) }));
+    scheduleOauthAutoPoll(runId);
+  } catch (e) {
+    if (runId !== oauthPollRunId) return;
+    stopOauthAutoPoll();
+    setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+  } finally {
+    if (runId === oauthPollRunId) oauthPollInFlight = false;
+  }
+}
+
 function wireOauth() {
   $("outlookAuthStart").addEventListener("click", async () => {
+    stopOauthAutoPoll();
+    const runId = ++oauthPollRunId;
     setMsg("deviceCodeMsg", T("starting"));
+    setMsg("outlookOauthMsg", "");
+    $("outlookAuthStart").disabled = true;
     try {
       const r = await bg({ type: "BG_OUTLOOK_AUTH_START" });
+      if (runId !== oauthPollRunId) return;
       if (!r || !r.ok) {
+        stopOauthAutoPoll();
         setMsg("deviceCodeMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
         return;
       }
       const dc = r.deviceCode;
       const link = dc.verification_uri_complete || dc.verification_uri;
+      oauthPollDelayMs = Math.max(1, Number(dc.interval) || 5) * 1000;
+      oauthPollExpiresAt = Date.now() + Math.max(1, Number(dc.expires_in) || 900) * 1000;
       setMsg("deviceCodeMsg", T("device_code_msg", { uri: dc.verification_uri, code: dc.user_code, sec: dc.expires_in }));
+      setMsg("outlookOauthMsg", T("oauth_waiting", { sec: Math.round(oauthPollDelayMs / 1000) }));
       if (link) chrome.tabs.create({ url: link });
+      scheduleOauthAutoPoll(runId, oauthPollDelayMs);
     } catch (e) {
-      setMsg("deviceCodeMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
-    }
-  });
-
-  $("outlookAuthPoll").addEventListener("click", async () => {
-    setMsg("outlookOauthMsg", T("polling"));
-    try {
-      const r = await bg({ type: "BG_OUTLOOK_AUTH_POLL" });
-      if (!r || !r.ok) {
-        setMsg("outlookOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
-        return;
-      }
-      const result = r.result;
-      if (result.status === "success") setMsg("outlookOauthMsg", T("connected"));
-      else if (result.status === "expired") setMsg("outlookOauthMsg", T("expired"));
-      else setMsg("outlookOauthMsg", T("pending", { err: result.error || "authorization_pending" }));
-      await refreshStatus();
-    } catch (e) {
+      if (runId !== oauthPollRunId) return;
+      stopOauthAutoPoll();
       setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
-    setTimeout(() => setMsg("outlookOauthMsg", ""), 3500);
   });
 
   $("outlookClear").addEventListener("click", async () => {
+    stopOauthAutoPoll();
     setMsg("outlookOauthMsg", T("clearing"));
     try {
       const r = await bg({ type: "BG_OUTLOOK_CLEAR" });
       setMsg("outlookOauthMsg", r && r.ok ? T("cleared") : T("failed"));
       await refreshStatus();
+      if (r && r.ok) {
+        selected = null;
+        setNavActive(null);
+        showPanel("panelEmpty");
+      }
     } catch (e) {
       setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
