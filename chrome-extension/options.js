@@ -56,7 +56,7 @@ function refreshPwdToggleLabels() {
 
 // ---- i18n ----------------------------------------------------------------
 function applyRichI18n() {
-  const map = { qqHowto: "qq_howto", clientIdHowto: "client_id_howto" };
+  const map = { qqHowto: "qq_howto", outlookImapHelp: "outlook_imap_howto", clientIdHowto: "client_id_howto" };
   for (const id of Object.keys(map)) {
     const el = $(id);
     if (el) el.innerHTML = T(map[id]);

@@ -2,6 +2,7 @@ import { extractBestOtp } from "../otp/extract.js";
 import type { OtpStore } from "../otp/store.js";
 import { scopedKey } from "../http/auth.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
+import { getOutlookClientId } from "../storage/settings.js";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -33,7 +34,6 @@ export class OutlookOAuthProvider {
   private store: OtpStore;
   private userId: string;
   private refreshKey: string;
-  private clientId: string | null = null;
   private running = false;
   private pollTimer: NodeJS.Timeout | null = null;
 
@@ -52,6 +52,11 @@ export class OutlookOAuthProvider {
     this.refreshKey = scopedKey(userId, "outlook_oauth:refresh");
   }
 
+  // Instance-wide client ID set by the admin; shared by every user's sign-in.
+  private get clientId(): string | null {
+    return getOutlookClientId() || null;
+  }
+
   status() {
     return {
       mode: "oauth" as const,
@@ -61,10 +66,6 @@ export class OutlookOAuthProvider {
       lastError: this.lastError,
       lastPollAt: this.lastPollAt,
     };
-  }
-
-  setClientId(clientId: string | null) {
-    this.clientId = clientId;
   }
 
   async hasRefreshToken(): Promise<boolean> {

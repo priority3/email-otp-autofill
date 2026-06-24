@@ -156,6 +156,8 @@
       outlook_email: "Outlook Email",
       app_password: "App Password",
       app_password_ph: "App password (recommended), or normal password if IMAP allows",
+      outlook_imap_howto:
+        'How to get it: sign in to <a href="https://account.microsoft.com/security" target="_blank" rel="noopener">Microsoft account · Security</a> → turn on "Two-step verification" first → open "Advanced security options" → under "App passwords" click "Create a new app password" → copy the generated password here.',
       imap_no_echo: "The saved password is pre-filled as dots — click the eye to reveal it.",
       save_outlook_imap: "Save Outlook IMAP",
       imap_configured: "IMAP configured",
@@ -304,6 +306,8 @@
       outlook_email: "Outlook 邮箱",
       app_password: "应用专用密码",
       app_password_ph: "应用专用密码（推荐），若 IMAP 允许也可用普通密码",
+      outlook_imap_howto:
+        '获取途径：登录 <a href="https://account.microsoft.com/security" target="_blank" rel="noopener">Microsoft 账户 · 安全</a> → 先开启「两步验证」→ 进入「高级安全选项」→ 在「应用密码」下点「创建新的应用密码」→ 复制生成的密码填入此处。',
       imap_no_echo: "已保存的密码会以圆点回填，点右侧小眼睛可查看。",
       save_outlook_imap: "保存 Outlook IMAP",
       imap_configured: "IMAP 已配置",

@@ -206,6 +206,18 @@
             <label class="switch"><input type="checkbox" id="reqInvite" /><span class="slider"></span></label>
           </div>
           <div class="msg" id="settingsMsg" style="margin-top:8px;"></div>
+
+          <h2 style="margin-top:22px;">📨 Outlook OAuth</h2>
+          <div class="msg" style="margin-bottom:4px;">
+            在 Azure 注册一个支持「个人 Microsoft 账户」的应用，并开启「Allow public client flows」，
+            把 Application (client) ID 填入此处。所有用户的 Outlook 授权登录共用它。
+          </div>
+          <label for="outlookClientId">Microsoft App Client ID</label>
+          <input id="outlookClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
+          <div class="row" style="margin-top:12px;">
+            <button class="primary" id="saveClientId">保存</button>
+            <span class="msg" id="clientIdMsg"></span>
+          </div>
         </div>
       </div>
     </main>
@@ -257,6 +269,10 @@
           <div class="stat"><div class="n">${s.invites.used}/${s.invites.total}</div><div class="l">邀请码 已用/总</div></div>
           <div class="stat"><div class="n">${s.invites.unused}</div><div class="l">未用邀请码</div></div>`;
         $("reqInvite").checked = !!s.requireInvite;
+        // Don't clobber the field while the admin is mid-edit (focused).
+        if (document.activeElement !== $("outlookClientId")) {
+          $("outlookClientId").value = s.outlookClientId || "";
+        }
         $("tabUsersCount").textContent = s.users.total ? `(${s.users.total})` : "";
         $("tabInvitesCount").textContent = s.invites.total ? `(${s.invites.total})` : "";
       }
@@ -369,6 +385,16 @@
           await api("/v1/admin/settings", { method: "POST", body: JSON.stringify({ requireInvite: $("reqInvite").checked }) });
           $("settingsMsg").textContent = "已保存。" + ($("reqInvite").checked ? "新用户需邀请码。" : "新用户无需邀请码。");
         } catch { $("settingsMsg").textContent = "保存失败"; }
+      });
+
+      $("saveClientId").addEventListener("click", async () => {
+        const outlookClientId = $("outlookClientId").value.trim();
+        $("clientIdMsg").textContent = "保存中…";
+        try {
+          const r = await api("/v1/admin/settings", { method: "POST", body: JSON.stringify({ outlookClientId }) });
+          $("clientIdMsg").textContent = r.outlookClientId ? "已保存。" : "已清空。";
+          setTimeout(() => ($("clientIdMsg").textContent = ""), 2500);
+        } catch { $("clientIdMsg").textContent = "保存失败"; }
       });
 
       $("genBtn").addEventListener("click", async () => {

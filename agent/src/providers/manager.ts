@@ -23,7 +23,6 @@ export class ProviderManager {
     this.userId = userId;
     this.config = config;
     this.outlookOAuth = new OutlookOAuthProvider(store, userId);
-    this.outlookOAuth.setClientId(this.config.outlook.clientId ?? null);
   }
 
   private kcQq(email: string) {
@@ -44,7 +43,6 @@ export class ProviderManager {
 
   async reloadConfig(): Promise<void> {
     this.config = await loadConfig(this.userId);
-    this.outlookOAuth.setClientId(this.config.outlook.clientId ?? null);
     await this.reconcile();
   }
 

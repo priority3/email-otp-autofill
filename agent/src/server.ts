@@ -37,7 +37,7 @@ import {
   listInvites,
   revokeInvite,
 } from "./storage/invites.js";
-import { isInviteRequired, setInviteRequired } from "./storage/settings.js";
+import { isInviteRequired, setInviteRequired, getOutlookClientId, setOutlookClientId } from "./storage/settings.js";
 
 function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefined {
   if (!raw) return undefined;
@@ -189,6 +189,7 @@ export async function startServer() {
     );
     const outlookOauthConnected =
       cfg.outlook.mode === "oauth" ? await mgr.getOutlookOAuth().hasRefreshToken() : false;
+    const outlookClientId = getOutlookClientId();
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
@@ -199,8 +200,9 @@ export async function startServer() {
         qq: { accounts: qqAccounts },
         outlook: {
           mode: cfg.outlook.mode,
-          clientId: cfg.outlook.clientId ?? null,
-          clientIdSet: Boolean(cfg.outlook.clientId),
+          // Client ID is now an instance-wide admin setting (not per-user).
+          clientId: outlookClientId || null,
+          clientIdSet: Boolean(outlookClientId),
           oauthConnected: outlookOauthConnected,
           imapAccounts,
         },
@@ -285,7 +287,7 @@ export async function startServer() {
   // ---- Outlook -----------------------------------------------------------
   app.post("/v1/outlook/config", async (req, res) => {
     const Body = z.discriminatedUnion("mode", [
-      z.object({ mode: z.literal("oauth"), clientId: z.string().min(8) }),
+      z.object({ mode: z.literal("oauth") }),
       z.object({ mode: z.literal("imap"), email: z.string().email(), appPassword: z.string().min(4) }),
     ]);
     const body = Body.safeParse(req.body);
@@ -294,9 +296,11 @@ export async function startServer() {
     const mgr = await mgrFor(req);
 
     if (data.mode === "oauth") {
+      // Client ID is an instance-wide admin setting; switching to OAuth mode just
+      // flips the per-user mode flag. Sign-in uses the global client ID.
+      if (!getOutlookClientId()) return res.status(400).json({ ok: false, error: "client_id_not_set" });
       await mgr.updateConfig((c) => {
         c.outlook.mode = "oauth";
-        c.outlook.clientId = data.clientId;
       });
       res.json({ ok: true });
       return;
@@ -371,6 +375,7 @@ export async function startServer() {
       users: { total: totalUsers, todayNew, active7d: activ7, disabled },
       invites: inviteStats(),
       requireInvite: isInviteRequired(),
+      outlookClientId: getOutlookClientId(),
     });
   });
 
@@ -403,11 +408,20 @@ export async function startServer() {
   });
 
   app.post("/v1/admin/settings", requireAdmin, (req, res) => {
-    const Body = z.object({ requireInvite: z.boolean() });
+    const Body = z.object({
+      requireInvite: z.boolean().optional(),
+      // Microsoft App (client) ID for Outlook OAuth. Empty string clears it.
+      outlookClientId: z.string().trim().max(200).optional(),
+    });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    setInviteRequired(body.data.requireInvite);
-    res.json({ ok: true, requireInvite: isInviteRequired() });
+    if (body.data.requireInvite !== undefined) setInviteRequired(body.data.requireInvite);
+    if (body.data.outlookClientId !== undefined) setOutlookClientId(body.data.outlookClientId);
+    res.json({
+      ok: true,
+      requireInvite: isInviteRequired(),
+      outlookClientId: getOutlookClientId(),
+    });
   });
 
   // Summarize the mailboxes a user has bound (from their per-user config).
@@ -416,7 +430,7 @@ export async function startServer() {
     const out: Array<{ type: string; email?: string }> = [];
     for (const a of cfg.qq.accounts) out.push({ type: "qq", email: a.email });
     for (const a of cfg.outlook.imapAccounts) out.push({ type: "outlook_imap", email: a.email });
-    if (cfg.outlook.mode === "oauth" && cfg.outlook.clientId) out.push({ type: "outlook_oauth" });
+    if (cfg.outlook.mode === "oauth" && getOutlookClientId()) out.push({ type: "outlook_oauth" });
     return out;
   }
 

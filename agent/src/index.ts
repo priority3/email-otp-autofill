@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { startServer } from "./server.js";
 
 // Defense-in-depth: never let a stray async error (e.g. a flaky IMAP connection

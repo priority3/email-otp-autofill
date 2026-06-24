@@ -29,3 +29,15 @@ export function isInviteRequired(): boolean {
 export function setInviteRequired(on: boolean): void {
   setSetting(REQUIRE_INVITE_KEY, on ? "1" : "0");
 }
+
+const OUTLOOK_CLIENT_ID_KEY = "outlook_client_id";
+
+// Instance-wide Microsoft App (client) ID for Outlook OAuth. The admin registers
+// one app and sets it here; every user's OAuth sign-in shares it. Empty = unset.
+export function getOutlookClientId(): string {
+  return getSetting(OUTLOOK_CLIENT_ID_KEY, "").trim();
+}
+
+export function setOutlookClientId(clientId: string): void {
+  setSetting(OUTLOOK_CLIENT_ID_KEY, clientId.trim());
+}
