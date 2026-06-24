@@ -136,9 +136,9 @@
       client_id: "Microsoft App Client ID",
       client_id_ph: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       client_id_hint:
-        "You need a free App Registration that supports personal Microsoft accounts. The agent uses Device Code flow, so no redirect URL needed.",
+        "You need a free App Registration that supports personal Microsoft accounts and is configured as a Mobile/Desktop public client.",
       client_id_howto:
-        'How to get it: open <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">Azure Portal · App registrations</a> → New registration → set Supported account types to "Personal Microsoft accounts only" → no Redirect URI needed → after registering, copy the "Application (client) ID" here. Also set "Allow public client flows" to Yes on the app\'s Authentication page (required for the device code flow).',
+        'How to get it: open <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">Azure Portal · App registrations</a> → New registration → set Supported account types to "Personal Microsoft accounts only" → open Authentication → Add a platform → Mobile and desktop applications → select or enter https://login.microsoftonline.com/common/oauth2/nativeclient → set "Allow public client flows" to Yes → copy the "Application (client) ID" here.',
       save_client_id: "Save Client ID",
       start_signin: "Start Sign-in",
       poll: "Poll",
@@ -150,6 +150,7 @@
       connected: "Connected.",
       expired: "Expired. Start again.",
       pending: "Pending ({err})",
+      oauth_waiting: "Waiting for Microsoft authorization… checking every {sec}s.",
       device_code_msg: "Open {uri} and enter code {code} (expires in {sec}s).",
 
       // --- toast (background → content) ---
@@ -275,9 +276,9 @@
       client_id: "Microsoft 应用 Client ID",
       client_id_ph: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
       client_id_hint:
-        "需要一个支持个人 Microsoft 账户的免费应用注册。agent 使用设备码（Device Code）流程，无需配置回调地址。",
+        "需要一个支持个人 Microsoft 账户、并配置为 Mobile/Desktop public client 的免费应用注册。",
       client_id_howto:
-        '获取途径：打开 <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">Azure 门户 · 应用注册</a> → New registration → Supported account types 选「Personal Microsoft accounts only」→ 无需填 Redirect URI → 注册后复制「Application (client) ID」填入此处。还需在该应用的 Authentication 页把「Allow public client flows」设为 Yes（设备码流程要求）。',
+        '获取途径：打开 <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener">Azure 门户 · 应用注册</a> → New registration → Supported account types 选「Personal Microsoft accounts only」→ 进入 Authentication → Add a platform → Mobile and desktop applications → 选择或填写 https://login.microsoftonline.com/common/oauth2/nativeclient → 将「Allow public client flows」设为 Yes → 复制「Application (client) ID」填入此处。',
       save_client_id: "保存 Client ID",
       start_signin: "开始登录",
       poll: "轮询",
@@ -289,6 +290,7 @@
       connected: "已连接。",
       expired: "已过期，请重新开始。",
       pending: "等待中（{err}）",
+      oauth_waiting: "等待 Microsoft 授权中…每 {sec} 秒自动检查。",
       device_code_msg: "打开 {uri} 并输入代码 {code}（{sec} 秒后过期）。",
       outlook_oauth_desc: "使用 OAuth 连接 Outlook 邮箱。",
 

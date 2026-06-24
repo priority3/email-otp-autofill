@@ -189,6 +189,7 @@ export async function startServer() {
     );
     const outlookOauthConnected =
       cfg.outlook.mode === "oauth" ? await mgr.getOutlookOAuth().hasRefreshToken() : false;
+    const outlookOauthEmail = outlookOauthConnected ? await mgr.getOutlookOAuth().getAccountEmail() : null;
     const outlookClientId = getOutlookClientId();
     res.json({
       ok: true,
@@ -204,6 +205,7 @@ export async function startServer() {
           clientId: outlookClientId || null,
           clientIdSet: Boolean(outlookClientId),
           oauthConnected: outlookOauthConnected,
+          oauthEmail: outlookOauthEmail,
           imapAccounts,
         },
       },
@@ -427,10 +429,14 @@ export async function startServer() {
   // Summarize the mailboxes a user has bound (from their per-user config).
   async function userMailboxes(userId: string) {
     const cfg = await loadConfig(userId);
+    const mgr = await registry.getOrCreate(userId);
     const out: Array<{ type: string; email?: string }> = [];
     for (const a of cfg.qq.accounts) out.push({ type: "qq", email: a.email });
     for (const a of cfg.outlook.imapAccounts) out.push({ type: "outlook_imap", email: a.email });
-    if (cfg.outlook.mode === "oauth" && getOutlookClientId()) out.push({ type: "outlook_oauth" });
+    if (cfg.outlook.mode === "oauth" && getOutlookClientId() && (await mgr.getOutlookOAuth().hasRefreshToken())) {
+      const email = await mgr.getOutlookOAuth().getAccountEmail();
+      out.push({ type: "outlook_oauth", email: email || undefined });
+    }
     return out;
   }
 
