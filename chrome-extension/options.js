@@ -485,6 +485,11 @@ async function refreshStatus() {
     }
     accounts = next;
     renderAccountList();
+
+    // Sync Outlook OAuth action buttons with connection state.
+    const outlookConnected = !!ol.oauthConnected;
+    $("outlookDisconnectedActions").hidden = outlookConnected;
+    $("outlookConnectedActions").hidden = !outlookConnected;
   } catch (e) {
     setAgentStatus(false, String(e && e.message ? e.message : e));
     accounts = [];
