@@ -30,6 +30,82 @@ function setNativeValue(input, value) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+// ---- Microsoft device-login auto-fill ------------------------------------
+// When the Outlook OAuth flow starts, options.js stores the user_code in
+// chrome.storage.local. On the Microsoft device-login page, we read the code
+// from the URL (verification_uri_complete) or from storage, then auto-fill
+// the input and click "Next".
+(function autoFillMsDeviceCode() {
+  // Check URL param first (verification_uri_complete includes user_code).
+  const urlCode = new URLSearchParams(window.location.search).get("user_code");
+
+  function tryFill(code) {
+    if (!code) return false;
+    // Microsoft's device-login page renders a text input for the code.
+    // Try multiple selectors to be resilient against page changes.
+    const input =
+      document.querySelector('input[name="otc"]') ||
+      document.querySelector('input[id*="code"]') ||
+      document.querySelector('input[id*="otc"]') ||
+      // Only fall back to generic text input on Microsoft domains to avoid
+      // accidentally filling unrelated pages.
+      (/(microsoft|live)\.com$/i.test(location.hostname)
+        ? document.querySelector('input[type="text"]')
+        : null);
+    if (!input || !isVisible(input)) return false;
+
+    console.log("[OTP autofill] Filling device code input");
+    setNativeValue(input, code);
+
+    // Auto-click "Next" / "Submit" after a short delay so React processes
+    // the synthetic input event before the form is submitted.
+    setTimeout(() => {
+      const btn =
+        document.querySelector('input[type="submit"]') ||
+        document.querySelector('button[type="submit"]') ||
+        // Fallback: look for a button whose text contains "Next"
+        Array.from(document.querySelectorAll("button")).find((b) =>
+          /next|continue|sign/i.test(b.textContent)
+        );
+      if (btn) {
+        console.log("[OTP autofill] Clicking Next button");
+        btn.click();
+      }
+    }, 500);
+
+    // Clean up stored code so it's not reused.
+    chrome.storage.local.remove(["msDeviceCode", "msDeviceCodeExp"]);
+    return true;
+  }
+
+  // If the code is already in the URL, try immediately.
+  if (urlCode) {
+    console.log("[OTP autofill] Found user_code in URL");
+    if (tryFill(urlCode)) return;
+  }
+
+  // Read from storage (set by options.js when the OAuth flow starts).
+  chrome.storage.local.get(["msDeviceCode", "msDeviceCodeExp"], (data) => {
+    const code = data.msDeviceCode;
+    const exp = data.msDeviceCodeExp;
+    if (!code || (exp && Date.now() > exp)) return;
+
+    console.log("[OTP autofill] Found device code in storage");
+
+    // Try immediately.
+    if (tryFill(code)) return;
+
+    // Otherwise watch for the SPA to render the input.
+    console.log("[OTP autofill] Waiting for input field to appear...");
+    const observer = new MutationObserver(() => {
+      if (tryFill(code)) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Give up after 15 seconds to avoid leaking the observer.
+    setTimeout(() => observer.disconnect(), 15000);
+  });
+})();
+
 function findOtpTarget() {
   const active = document.activeElement;
   if (active instanceof HTMLInputElement && isVisible(active) && isTextLikeInput(active) && likelyOtp(active)) {

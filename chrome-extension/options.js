@@ -630,11 +630,23 @@ function wireOauth() {
       }
       const dc = r.deviceCode;
       const link = dc.verification_uri_complete || dc.verification_uri;
+      // Store the device code so the content script can auto-fill it on the
+      // Microsoft login page (the page may redirect and lose the URL param).
+      if (dc.user_code) {
+        chrome.storage.local.set({
+          msDeviceCode: dc.user_code,
+          msDeviceCodeExp: Date.now() + Math.max(1, Number(dc.expires_in) || 900) * 1000
+        });
+      }
       oauthPollDelayMs = Math.max(1, Number(dc.interval) || 5) * 1000;
       oauthPollExpiresAt = Date.now() + Math.max(1, Number(dc.expires_in) || 900) * 1000;
       setMsg("deviceCodeMsg", T("device_code_msg", { uri: dc.verification_uri, code: dc.user_code, sec: dc.expires_in }));
       setMsg("outlookOauthMsg", T("oauth_waiting", { sec: Math.round(oauthPollDelayMs / 1000) }));
-      if (link) chrome.tabs.create({ url: link });
+      if (link) {
+        // Reason: Open in a popup window so the options page stays visible
+        // and the user can see the live polling status while signing in.
+        chrome.windows.create({ url: link, type: "popup", width: 500, height: 700 });
+      }
       scheduleOauthAutoPoll(runId, oauthPollDelayMs);
     } catch (e) {
       if (runId !== oauthPollRunId) return;
