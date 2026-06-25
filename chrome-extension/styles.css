@@ -182,6 +182,10 @@ h1 {
   flex-wrap: wrap;
 }
 
+.row[hidden] {
+  display: none;
+}
+
 .muted {
   color: var(--muted);
 }

@@ -211,20 +211,24 @@ async function renderAccountFormByType(type) {
   }
 }
 
+function toggleOutlookActions(connected) {
+  const dis = $("outlookDisconnectedActions");
+  const con = $("outlookConnectedActions");
+  // Reason: use style.display instead of hidden attribute because .row CSS
+  // sets display:flex which overrides the browser's default [hidden] behavior.
+  if (dis) dis.style.display = connected ? "none" : "";
+  if (con) con.style.display = connected ? "" : "none";
+}
+
 async function refreshOutlookOAuthState() {
   try {
     const r = await bg({ type: "BG_AGENT_STATUS" });
     if (r && r.ok && r.status && r.status.config) {
       const ol = r.status.config.outlook || {};
       const connected = !!ol.oauthConnected;
-      console.log("[OAuth] refreshOutlookOAuthState:", { connected, clientIdSet: ol.clientIdSet, mode: ol.mode });
       setMsg("outlookState", T(connected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
       // Toggle action groups: Start/Clear when disconnected, Disconnect when connected.
-      const disGroup = $("outlookDisconnectedActions");
-      const conGroup = $("outlookConnectedActions");
-      console.log("[OAuth] Elements:", { disGroup: !!disGroup, conGroup: !!conGroup });
-      if (disGroup) disGroup.hidden = connected;
-      if (conGroup) conGroup.hidden = !connected;
+      toggleOutlookActions(connected);
     }
   } catch {
     // ignore
@@ -491,12 +495,7 @@ async function refreshStatus() {
     renderAccountList();
 
     // Sync Outlook OAuth action buttons with connection state.
-    const outlookConnected = !!ol.oauthConnected;
-    const disGroup = $("outlookDisconnectedActions");
-    const conGroup = $("outlookConnectedActions");
-    console.log("[OAuth] refreshStatus:", { outlookConnected, disGroup: !!disGroup, conGroup: !!conGroup });
-    if (disGroup) disGroup.hidden = outlookConnected;
-    if (conGroup) conGroup.hidden = !outlookConnected;
+    toggleOutlookActions(!!ol.oauthConnected);
   } catch (e) {
     setAgentStatus(false, String(e && e.message ? e.message : e));
     accounts = [];
@@ -607,11 +606,7 @@ async function pollOutlookAuthOnce(runId) {
       stopOauthAutoPoll();
       setMsg("outlookOauthMsg", T("connected"));
       // Toggle buttons immediately before waiting for status refresh.
-      const disEl = $("outlookDisconnectedActions");
-      const conEl = $("outlookConnectedActions");
-      console.log("[OAuth] Poll success, toggling:", { disEl: !!disEl, conEl: !!conEl });
-      if (disEl) disEl.hidden = true;
-      if (conEl) conEl.hidden = false;
+      toggleOutlookActions(true);
       await refreshStatus();
       await refreshOutlookOAuthState();
       setTimeout(() => setMsg("outlookOauthMsg", ""), 2500);
