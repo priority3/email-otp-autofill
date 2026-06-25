@@ -95,7 +95,9 @@ function setNavActive(key) {
   if (key === "agent") $("navAgent").classList.add("active");
   else if (key === "add") $("navAdd").classList.add("active");
   else if (key && key.email) {
-    const node = document.querySelector(`.nav-item[data-email="${cssEscape(key.email)}"]`);
+    const selector = `.nav-item[data-email="${cssEscape(key.email)}"]`;
+    const node = document.querySelector(selector);
+    console.log("[Nav] setNavActive:", { key, selector, found: !!node });
     if (node) node.classList.add("active");
   }
 }
