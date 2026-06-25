@@ -216,7 +216,11 @@ async function refreshOutlookOAuthState() {
     const r = await bg({ type: "BG_AGENT_STATUS" });
     if (r && r.ok && r.status && r.status.config) {
       const ol = r.status.config.outlook || {};
-      setMsg("outlookState", T(ol.oauthConnected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
+      const connected = !!ol.oauthConnected;
+      setMsg("outlookState", T(connected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
+      // Toggle action groups: Start/Clear when disconnected, Disconnect when connected.
+      $("outlookDisconnectedActions").hidden = connected;
+      $("outlookConnectedActions").hidden = !connected;
     }
   } catch {
     // ignore
@@ -591,6 +595,7 @@ async function pollOutlookAuthOnce(runId) {
       stopOauthAutoPoll();
       setMsg("outlookOauthMsg", T("connected"));
       await refreshStatus();
+      await refreshOutlookOAuthState();
       setTimeout(() => setMsg("outlookOauthMsg", ""), 2500);
       return;
     }
@@ -667,6 +672,20 @@ function wireOauth() {
         setNavActive(null);
         showPanel("panelEmpty");
       }
+    } catch (e) {
+      setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+    setTimeout(() => setMsg("outlookOauthMsg", ""), 2500);
+  });
+
+  $("outlookDisconnect").addEventListener("click", async () => {
+    stopOauthAutoPoll();
+    setMsg("outlookOauthMsg", T("clearing"));
+    try {
+      const r = await bg({ type: "BG_OUTLOOK_CLEAR" });
+      setMsg("outlookOauthMsg", r && r.ok ? T("cleared") : T("failed"));
+      await refreshStatus();
+      await refreshOutlookOAuthState();
     } catch (e) {
       setMsg("outlookOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
