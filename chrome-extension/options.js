@@ -217,10 +217,12 @@ async function refreshOutlookOAuthState() {
     if (r && r.ok && r.status && r.status.config) {
       const ol = r.status.config.outlook || {};
       const connected = !!ol.oauthConnected;
+      console.log("[OAuth] refreshOutlookOAuthState:", { connected, clientIdSet: ol.clientIdSet, mode: ol.mode });
       setMsg("outlookState", T(connected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
       // Toggle action groups: Start/Clear when disconnected, Disconnect when connected.
       $("outlookDisconnectedActions").hidden = connected;
       $("outlookConnectedActions").hidden = !connected;
+      console.log("[OAuth] Buttons toggled:", { disconnectedHidden: $("outlookDisconnectedActions").hidden, connectedHidden: $("outlookConnectedActions").hidden });
     }
   } catch {
     // ignore
@@ -488,6 +490,7 @@ async function refreshStatus() {
 
     // Sync Outlook OAuth action buttons with connection state.
     const outlookConnected = !!ol.oauthConnected;
+    console.log("[OAuth] refreshStatus:", { outlookConnected, mode: ol.mode });
     $("outlookDisconnectedActions").hidden = outlookConnected;
     $("outlookConnectedActions").hidden = !outlookConnected;
   } catch (e) {
@@ -599,6 +602,9 @@ async function pollOutlookAuthOnce(runId) {
     if (result.status === "success") {
       stopOauthAutoPoll();
       setMsg("outlookOauthMsg", T("connected"));
+      // Toggle buttons immediately before waiting for status refresh.
+      $("outlookDisconnectedActions").hidden = true;
+      $("outlookConnectedActions").hidden = false;
       await refreshStatus();
       await refreshOutlookOAuthState();
       setTimeout(() => setMsg("outlookOauthMsg", ""), 2500);
