@@ -91,13 +91,15 @@ function showPanel(id) {
 }
 
 function setNavActive(key) {
-  document.querySelectorAll(".nav-item").forEach((el) => el.classList.remove("active"));
-  if (key === "agent") $("navAgent").classList.add("active");
-  else if (key === "add") $("navAdd").classList.add("active");
-  else if (key && key.email) {
-    const selector = `.nav-item[data-email="${cssEscape(key.email)}"]`;
+  const allNavItems = document.querySelectorAll(".nav-item");
+  allNavItems.forEach((el) => el.classList.remove("active"));
+  if (key === "agent") {
+    $("navAgent").classList.add("active");
+  } else if (key === "add") {
+    $("navAdd").classList.add("active");
+  } else if (key && key.type) {
+    const selector = `.nav-item[data-account-key="${cssEscape(accountKey(key.type, key.email))}"]`;
     const node = document.querySelector(selector);
-    console.log("[Nav] setNavActive:", { key, selector, found: !!node });
     if (node) node.classList.add("active");
   }
 }
@@ -105,6 +107,10 @@ function setNavActive(key) {
 // Minimal attribute-selector escape for emails (no CSS.escape in older engines).
 function cssEscape(s) {
   return String(s).replace(/["\\]/g, "\\$&");
+}
+
+function accountKey(type, email) {
+  return `${type}:${String(email ?? "")}`;
 }
 
 // ---- account list (sidebar) ----------------------------------------------
@@ -120,6 +126,7 @@ function renderAccountList() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "nav-item account-item";
+    btn.setAttribute("data-account-key", accountKey(acc.type, acc.email));
     btn.setAttribute("data-email", labelText);
     btn.setAttribute("data-type", acc.type);
 
@@ -144,7 +151,7 @@ function renderAccountList() {
   if (empty) empty.hidden = accounts.length > 0;
 
   // Keep the active highlight in sync after a re-render.
-  if (selected && selected.email) setNavActive(selected);
+  if (selected) setNavActive(selected);
 }
 
 // ---- selection handlers --------------------------------------------------
@@ -205,7 +212,10 @@ async function renderAccountFormByType(type) {
   const isQq = type === "qq";
   $("qqFields").hidden = !isQq;
   $("outlookOauthFields").hidden = isQq;
-  $("acctActions").hidden = !isQq; // OAuth has its own buttons
+  // Keep acctActions visible for both types; hide Save for OAuth (it's a no-op).
+  $("acctActions").hidden = false;
+  $("acctSave").hidden = !isQq;
+  $("acctRemove").hidden = true; // only shown for existing QQ accounts via selectAccount
   if (!isQq) {
     // Switch user to OAuth mode on the server, then refresh state.
     try { await bg({ type: "BG_OUTLOOK_CONFIG", payload: { mode: "oauth" } }); } catch { /* ignore */ }
@@ -216,10 +226,16 @@ async function renderAccountFormByType(type) {
 function toggleOutlookActions(connected) {
   const dis = $("outlookDisconnectedActions");
   const con = $("outlookConnectedActions");
-  // Reason: use style.display instead of hidden attribute because .row CSS
-  // sets display:flex which overrides the browser's default [hidden] behavior.
-  if (dis) dis.style.display = connected ? "none" : "";
-  if (con) con.style.display = connected ? "" : "none";
+  // Reason: `.row { display:flex }` can override `[hidden]`, so we drive both
+  // the attribute and inline display to keep the OAuth action groups in sync.
+  if (dis) {
+    dis.hidden = connected;
+    dis.style.display = connected ? "none" : "";
+  }
+  if (con) {
+    con.hidden = !connected;
+    con.style.display = connected ? "" : "none";
+  }
 }
 
 async function refreshOutlookOAuthState() {
