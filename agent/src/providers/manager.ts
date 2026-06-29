@@ -97,6 +97,7 @@ export class ProviderManager {
         secure: true,
         auth: { user: email, pass },
         store: this.store,
+        pollIntervalMs: this.config.pollIntervalMs,
       });
       // Reason: a bad credential makes start() reject; swallow it so one broken
       // account never crashes the agent (critical in multi-tenant).
@@ -140,6 +141,7 @@ export class ProviderManager {
         secure: true,
         auth: { user: email, pass },
         store: this.store,
+        pollIntervalMs: this.config.pollIntervalMs,
       });
       const task = watcher.start().catch((e) => {
         console.error(`[otp-agent] outlook watcher failed for ${email}: ${String((e as any)?.message || e)}`);

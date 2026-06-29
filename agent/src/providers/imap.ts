@@ -17,6 +17,7 @@ export type ImapProviderOptions = {
   secure: boolean;
   auth: ImapAuth;
   store: OtpStore;
+  pollIntervalMs?: number;
 };
 
 export type VerifyImapInput = {
@@ -107,6 +108,8 @@ export class ImapOtpWatcher {
   private running = false;
   private processing: Promise<void> = Promise.resolve();
   private lastError: string | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshBusy = false;
 
   constructor(opts: ImapProviderOptions) {
     this.opts = opts;
@@ -123,27 +126,73 @@ export class ImapOtpWatcher {
     return { running: this.running, lastError: this.lastError };
   }
 
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    this.processing = this.processing
+      .then(async () => {
+        if (!this.running) return;
+        await task();
+      })
+      .catch((e) => {
+        this.lastError = e instanceof Error ? e.message : String(e);
+      });
+    return this.processing;
+  }
+
+  private queueFetchLatest(): void {
+    if (!this.running) return;
+    this.enqueue(async () => {
+      await this.fetchLatest();
+    });
+  }
+
+  private queueHeartbeat(): void {
+    if (!this.running || this.refreshBusy) return;
+    this.refreshBusy = true;
+    const task = this.enqueue(async () => {
+      try {
+        await this.client.noop();
+      } catch (e) {
+        this.lastError = e instanceof Error ? e.message : String(e);
+      } finally {
+        await this.fetchLatest();
+      }
+    });
+    void task.finally(() => {
+      this.refreshBusy = false;
+    });
+  }
+
+  private startHeartbeat(): void {
+    if (this.refreshTimer || !this.opts.pollIntervalMs) return;
+    const intervalMs = Math.max(1000, this.opts.pollIntervalMs);
+    this.refreshTimer = setInterval(() => {
+      this.queueHeartbeat();
+    }, intervalMs);
+    this.refreshTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
+    this.refreshBusy = false;
+  }
+
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
 
-    this.client.on("error", (err) => {
-      this.lastError = err instanceof Error ? err.message : String(err);
-    });
+      this.client.on("error", (err) => {
+        this.lastError = err instanceof Error ? err.message : String(err);
+      });
 
-    this.client.on("exists", () => {
-      this.processing = this.processing
-        .then(async () => {
-          await this.fetchLatest();
-        })
-        .catch((e) => {
-          this.lastError = e instanceof Error ? e.message : String(e);
-        });
-    });
+      this.client.on("exists", () => {
+        this.queueFetchLatest();
+      });
 
     try {
       await this.client.connect();
       await this.fetchLatest(); // initial quick scan
+      this.startHeartbeat();
       // Keep the connection alive.
       while (this.running) {
         try {
@@ -161,6 +210,7 @@ export class ImapOtpWatcher {
 
   stop() {
     this.running = false;
+    this.stopHeartbeat();
     try {
       this.client.close();
     } catch {
