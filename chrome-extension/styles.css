@@ -240,6 +240,51 @@ h1 {
   transition: color 0.15s var(--ease), transform 0.1s var(--ease);
 }
 
+/* code + left/right paging arrows; arrows are hidden unless >1 valid code */
+.otp-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.otp-nav {
+  flex: none;
+  width: 30px;
+  height: 40px;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 400;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.otp-nav:hover {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--panel-border);
+}
+
+.otp-nav[hidden] {
+  display: none;
+}
+
+/* "2 / 3" position hint under the code when paging multiple codes */
+.otp-indicator {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--faint);
+}
+
+.otp-indicator[hidden] {
+  display: none;
+}
+
 /* clickable affordance for "click code to copy" */
 .code.copyable {
   cursor: pointer;

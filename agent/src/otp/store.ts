@@ -69,13 +69,16 @@ export class OtpStore {
     return items.slice(0, limit);
   }
 
-  latest(q: LatestQuery): OtpItem | null {
+  // All currently-valid OTPs matching the query, best match first. Shares its
+  // filtering + scoring with latest() so the popup's "next code" navigation
+  // walks the exact same candidate set the autofill would pick from.
+  validList(q: LatestQuery): OtpItem[] {
     const now = Date.now();
     const providers = q.providers?.length ? new Set(q.providers) : null;
     const domain = q.domain?.toLowerCase();
     const account = q.account?.toLowerCase();
 
-    let best: { item: OtpItem; score: number } | null = null;
+    const scored: { item: OtpItem; score: number }[] = [];
     for (const it of this.items) {
       if (q.userId && (it.userId ?? "local") !== q.userId) continue;
       if (providers && !providers.has(it.provider)) continue;
@@ -98,9 +101,15 @@ export class OtpStore {
       // prefer 6-digit in general
       if (it.code.length === 6) score += 30;
 
-      if (!best || score > best.score) best = { item: it, score };
+      scored.push({ item: it, score });
     }
-    return best?.item ?? null;
+    // Reason: stable highest-score-first order so index 0 == latest()'s pick.
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map((s) => s.item);
+  }
+
+  latest(q: LatestQuery): OtpItem | null {
+    return this.validList(q)[0] ?? null;
   }
 }
 

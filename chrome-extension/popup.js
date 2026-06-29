@@ -8,6 +8,11 @@ let currentOtp = null;
 let maxAgeMs = 120_000;
 let countdownTimer = null;
 
+// All currently-valid codes (best match first) plus which one is on screen.
+// The user can page left/right through them; index 0 is the autofill default.
+let otpList = [];
+let currentIndex = 0;
+
 // Human-facing provider label + icon for the source tag.
 const PROVIDER_META = {
   qq: { name: "QQ 邮箱", icon: "📩" },
@@ -66,6 +71,50 @@ function renderSource(otp) {
   setText("sourceIcon", m.icon);
   setText("sourceName", m.name);
   tag.hidden = false;
+}
+
+// Show/hide the paging arrows + "n / m" indicator. Arrows appear only when
+// more than one valid code is in the window.
+function renderNav() {
+  const prev = $("otpPrev");
+  const next = $("otpNext");
+  const ind = $("otpIndicator");
+  const multi = otpList.length > 1;
+  if (prev) prev.hidden = !multi;
+  if (next) next.hidden = !multi;
+  if (ind) {
+    ind.hidden = !multi;
+    if (multi) ind.textContent = `${currentIndex + 1} / ${otpList.length}`;
+  }
+}
+
+// Render the currently-selected OTP: code, source, nav, and countdown. Keeps
+// currentOtp in sync so the per-second tick targets the on-screen code.
+function renderCurrent() {
+  if (currentIndex < 0) currentIndex = 0;
+  if (currentIndex >= otpList.length) currentIndex = Math.max(0, otpList.length - 1);
+  currentOtp = otpList[currentIndex] || null;
+
+  setText("code", currentOtp && currentOtp.code ? currentOtp.code : "------");
+  renderSource(currentOtp);
+  renderNav();
+
+  if (currentOtp) {
+    startCountdown();
+  } else {
+    stopCountdown();
+    $("otpBar").hidden = true;
+    setText("meta", formatMeta(null));
+  }
+}
+
+// Step to another code by a signed delta, wrapping around the ends so the
+// right arrow always advances to the next code.
+function goTo(delta) {
+  const n = otpList.length;
+  if (n <= 1) return;
+  currentIndex = (currentIndex + delta + n) % n;
+  renderCurrent();
 }
 
 // Drive the validity bar. The window prefers the TTL parsed from the email
@@ -138,9 +187,12 @@ async function refresh() {
 
   if (needLogin) {
     currentOtp = null;
+    otpList = [];
+    currentIndex = 0;
     stopCountdown();
     setText("code", "------");
     renderSource(null);
+    renderNav();
     $("otpBar").hidden = true;
     setText("meta", t(LANG, "need_login_hint"));
     if (meta) meta.classList.add("meta-error");
@@ -149,22 +201,35 @@ async function refresh() {
 
   try {
     const r = await bg({ type: "BG_FETCH_LATEST" });
-    const otp = r && r.ok ? r.otp : null;
-    currentOtp = otp;
-    setText("code", otp && otp.code ? otp.code : "------");
-    renderSource(otp);
-    if (otp) {
-      startCountdown();
+    const list = r && r.ok && Array.isArray(r.otps) ? r.otps : r && r.ok && r.otp ? [r.otp] : [];
+    // Reason: keep the user on the same code across refreshes (e.g. after copy)
+    // instead of snapping back to the newest one.
+    const prevId = currentOtp && currentOtp.id;
+    otpList = list;
+    currentIndex = 0;
+    if (prevId) {
+      const idx = otpList.findIndex((o) => o && o.id === prevId);
+      if (idx >= 0) currentIndex = idx;
+    }
+    if (otpList.length) {
+      renderCurrent();
     } else {
+      currentOtp = null;
       stopCountdown();
+      setText("code", "------");
+      renderSource(null);
+      renderNav();
       $("otpBar").hidden = true;
       setText("meta", formatMeta(null));
     }
   } catch (e) {
     currentOtp = null;
+    otpList = [];
+    currentIndex = 0;
     stopCountdown();
     setText("code", "------");
     renderSource(null);
+    renderNav();
     $("otpBar").hidden = true;
     setText("meta", t(LANG, "agent_unreachable"));
   }
@@ -200,7 +265,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("fill").addEventListener("click", async () => {
     $("fill").disabled = true;
     try {
-      const r = await bg({ type: "BG_FILL_NOW" });
+      // Reason: fill the code the user is actually looking at, not just the
+      // newest one — they may have paged to an earlier valid code.
+      const code = currentOtp && currentOtp.code ? currentOtp.code : undefined;
+      const r = await bg({ type: "BG_FILL_NOW", code });
       // On failure, stop the countdown tick (it would overwrite #meta each second)
       // and tell the user to copy/paste the code manually.
       if (!r || !r.ok) {
@@ -227,6 +295,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Click the code itself to copy — reuses the same handler as the Copy button.
   $("code").addEventListener("click", () => $("copy").click());
+
+  // Page between multiple valid codes (arrows + ←/→ keys).
+  $("otpPrev").addEventListener("click", () => goTo(-1));
+  $("otpNext").addEventListener("click", () => goTo(1));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft") goTo(-1);
+    else if (e.key === "ArrowRight") goTo(1);
+  });
 
   $("settings").addEventListener("click", () => {
     chrome.runtime.openOptionsPage();
