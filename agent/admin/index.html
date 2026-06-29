@@ -307,7 +307,7 @@
       }
 
       // ---- users ----
-      const MAIL_ICON = { qq: "📩", outlook_imap: "📨", outlook_oauth: "🔑" };
+      const MAIL_ICON = { qq: "📩", outlook_oauth: "🔑" };
       function mailboxBadges(list) {
         if (!list || !list.length) return '<span style="color:var(--faint)">—</span>';
         return list.map((m) => {

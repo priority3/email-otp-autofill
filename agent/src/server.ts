@@ -181,14 +181,7 @@ export async function startServer() {
         configured: Boolean(await secretGet(mgr.secretKeyFor("qq", a.email))),
       }))
     );
-    const imapAccounts = await Promise.all(
-      cfg.outlook.imapAccounts.map(async (a) => ({
-        email: a.email,
-        configured: Boolean(await secretGet(mgr.secretKeyFor("outlook_imap", a.email))),
-      }))
-    );
-    const outlookOauthConnected =
-      cfg.outlook.mode === "oauth" ? await mgr.getOutlookOAuth().hasRefreshToken() : false;
+    const outlookOauthConnected = await mgr.getOutlookOAuth().hasRefreshToken();
     const outlookOauthEmail = outlookOauthConnected ? await mgr.getOutlookOAuth().getAccountEmail() : null;
     const outlookClientId = getOutlookClientId();
     res.json({
@@ -206,7 +199,6 @@ export async function startServer() {
           clientIdSet: Boolean(outlookClientId),
           oauthConnected: outlookOauthConnected,
           oauthEmail: outlookOauthEmail,
-          imapAccounts,
         },
       },
     });
@@ -276,7 +268,7 @@ export async function startServer() {
   // ---- reveal secret -----------------------------------------------------
   app.post("/v1/secret/reveal", async (req, res) => {
     const Body = z.object({
-      kind: z.enum(["qq", "outlook_imap"]),
+      kind: z.literal("qq"),
       email: z.string().email(),
     });
     const body = Body.safeParse(req.body);
@@ -288,55 +280,24 @@ export async function startServer() {
 
   // ---- Outlook -----------------------------------------------------------
   app.post("/v1/outlook/config", async (req, res) => {
-    const Body = z.discriminatedUnion("mode", [
-      z.object({ mode: z.literal("oauth") }),
-      z.object({ mode: z.literal("imap"), email: z.string().email(), appPassword: z.string().min(4) }),
-    ]);
+    const Body = z.object({ mode: z.literal("oauth") });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    const data = body.data;
     const mgr = await mgrFor(req);
 
-    if (data.mode === "oauth") {
-      // Client ID is an instance-wide admin setting; switching to OAuth mode just
-      // flips the per-user mode flag. Sign-in uses the global client ID.
-      if (!getOutlookClientId()) return res.status(400).json({ ok: false, error: "client_id_not_set" });
-      await mgr.updateConfig((c) => {
-        c.outlook.mode = "oauth";
-      });
-      res.json({ ok: true });
-      return;
-    }
-
-    // Verify before saving (hard block on bad credentials / IMAP off).
-    const v = await verifyImap({
-      host: "imap-mail.outlook.com",
-      port: 993,
-      secure: true,
-      user: data.email,
-      pass: data.appPassword,
+    // Client ID is an instance-wide admin setting; switching to OAuth mode just
+    // flips the per-user mode flag. Sign-in uses the global client ID.
+    if (!getOutlookClientId()) return res.status(400).json({ ok: false, error: "client_id_not_set" });
+    await mgr.updateConfig((c) => {
+      c.outlook.mode = "oauth";
     });
-    if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
-    await secretSet(mgr.secretKeyFor("outlook_imap", data.email), data.appPassword);
-    await mgr.addOutlookImapAccount(data.email);
-    res.json({ ok: true });
-  });
-
-  app.post("/v1/outlook/imap/remove", async (req, res) => {
-    const Body = z.object({ email: z.string().email() });
-    const body = Body.safeParse(req.body);
-    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    const mgr = await mgrFor(req);
-    await mgr.removeOutlookImapAccount(body.data.email);
     res.json({ ok: true });
   });
 
   app.post("/v1/outlook/clear", async (req, res) => {
     const mgr = await mgrFor(req);
     await mgr.getOutlookOAuth().clearAuth();
-    await mgr.clearOutlookImap();
     await mgr.updateConfig((c) => {
-      c.outlook.clientId = undefined;
       c.outlook.mode = "oauth";
     });
     res.json({ ok: true });
@@ -432,7 +393,6 @@ export async function startServer() {
     const mgr = await registry.getOrCreate(userId);
     const out: Array<{ type: string; email?: string }> = [];
     for (const a of cfg.qq.accounts) out.push({ type: "qq", email: a.email });
-    for (const a of cfg.outlook.imapAccounts) out.push({ type: "outlook_imap", email: a.email });
     if (cfg.outlook.mode === "oauth" && getOutlookClientId() && (await mgr.getOutlookOAuth().hasRefreshToken())) {
       const email = await mgr.getOutlookOAuth().getAccountEmail();
       out.push({ type: "outlook_oauth", email: email || undefined });
