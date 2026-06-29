@@ -15,7 +15,6 @@ export class ProviderManager {
 
   // Multi-account: one IMAP watcher per mailbox, keyed by email.
   private qq = new Map<string, Watcher>();
-  private outlookImap = new Map<string, Watcher>();
   private outlookOAuth: OutlookOAuthProvider; // single-account per user
 
   constructor(store: OtpStore, config: AppConfig, userId: string = LOCAL_USER_ID) {
@@ -27,9 +26,6 @@ export class ProviderManager {
 
   private kcQq(email: string) {
     return scopedKey(this.userId, `qq:${email}`);
-  }
-  private kcOutlookImap(email: string) {
-    return scopedKey(this.userId, `outlook_imap:${email}`);
   }
 
   static async create(store: OtpStore, userId: string = LOCAL_USER_ID): Promise<ProviderManager> {
@@ -55,21 +51,14 @@ export class ProviderManager {
 
   async reconcile(): Promise<void> {
     await this.reconcileQq();
-    await this.reconcileOutlook();
     // OAuth poller is cheap; it exits early if not connected.
-    if (this.config.outlook.mode === "oauth") {
-      this.outlookOAuth.startPolling(this.config.pollIntervalMs);
-    } else {
-      this.outlookOAuth.stop();
-    }
+    this.outlookOAuth.startPolling(this.config.pollIntervalMs);
   }
 
   // Stop all watchers for this user (used when removing a user / shutting down).
   stopAll(): void {
     for (const [, w] of this.qq) w.watcher.stop();
-    for (const [, w] of this.outlookImap) w.watcher.stop();
     this.qq.clear();
-    this.outlookImap.clear();
     this.outlookOAuth.stop();
   }
 
@@ -108,48 +97,6 @@ export class ProviderManager {
     }
   }
 
-  private async reconcileOutlook(): Promise<void> {
-    // OAuth mode: no IMAP watchers should run.
-    if (this.config.outlook.mode !== "imap") {
-      for (const [email, w] of this.outlookImap) {
-        w.watcher.stop();
-        this.outlookImap.delete(email);
-      }
-      return;
-    }
-
-    // IMAP mode: keep the OAuth poller stopped, diff the IMAP accounts.
-    this.outlookOAuth.stop();
-    const wanted = new Set(this.config.outlook.imapAccounts.map((a) => a.email));
-
-    for (const [email, w] of this.outlookImap) {
-      if (!wanted.has(email)) {
-        w.watcher.stop();
-        this.outlookImap.delete(email);
-      }
-    }
-
-    for (const { email } of this.config.outlook.imapAccounts) {
-      if (this.outlookImap.has(email)) continue;
-      const pass = await secretGet(this.kcOutlookImap(email));
-      if (!pass) continue;
-      const watcher = new ImapOtpWatcher({
-        providerId: "outlook",
-        userId: this.userId,
-        host: "imap-mail.outlook.com",
-        port: 993,
-        secure: true,
-        auth: { user: email, pass },
-        store: this.store,
-        pollIntervalMs: this.config.pollIntervalMs,
-      });
-      const task = watcher.start().catch((e) => {
-        console.error(`[otp-agent] outlook watcher failed for ${email}: ${String((e as any)?.message || e)}`);
-      });
-      this.outlookImap.set(email, { watcher, task });
-    }
-  }
-
   // --- account add/remove -------------------------------------------------
 
   async addQqAccount(email: string): Promise<void> {
@@ -165,22 +112,6 @@ export class ProviderManager {
     });
   }
 
-  async addOutlookImapAccount(email: string): Promise<void> {
-    await this.updateConfig((c) => {
-      c.outlook.mode = "imap";
-      if (!c.outlook.imapAccounts.some((a) => a.email === email)) {
-        c.outlook.imapAccounts.push({ email });
-      }
-    });
-  }
-
-  async removeOutlookImapAccount(email: string): Promise<void> {
-    await secretDelete(this.kcOutlookImap(email));
-    await this.updateConfig((c) => {
-      c.outlook.imapAccounts = c.outlook.imapAccounts.filter((a) => a.email !== email);
-    });
-  }
-
   async clearQq(): Promise<void> {
     for (const { email } of this.config.qq.accounts) await secretDelete(this.kcQq(email));
     await this.updateConfig((c) => {
@@ -188,16 +119,9 @@ export class ProviderManager {
     });
   }
 
-  async clearOutlookImap(): Promise<void> {
-    for (const { email } of this.config.outlook.imapAccounts) await secretDelete(this.kcOutlookImap(email));
-    await this.updateConfig((c) => {
-      c.outlook.imapAccounts = [];
-    });
-  }
-
   // Expose the scoped secret key for a kind+email so the HTTP layer can read it.
-  secretKeyFor(kind: "qq" | "outlook_imap", email: string): string {
-    return kind === "qq" ? this.kcQq(email) : this.kcOutlookImap(email);
+  secretKeyFor(kind: "qq", email: string): string {
+    return this.kcQq(email);
   }
 }
 

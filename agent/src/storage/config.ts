@@ -3,8 +3,6 @@ import { z } from "zod";
 import { LOCAL_USER_ID } from "../http/auth.js";
 import { db } from "./db.js";
 
-const OutlookModeSchema = z.enum(["oauth", "imap"]);
-
 const AccountSchema = z.object({
   email: z.string().email(),
 });
@@ -22,12 +20,9 @@ const ConfigSchema = z.object({
     .default(() => ({ accounts: [] })),
   outlook: z
     .object({
-      mode: OutlookModeSchema.default("oauth"),
-      clientId: z.string().min(8).optional(), // OAuth mode (single account)
-      // Multi-account IMAP: app password lives under `outlook_imap:${email}`.
-      imapAccounts: z.array(AccountSchema).default(() => []),
+      mode: z.literal("oauth").default("oauth"),
     })
-    .default(() => ({ mode: "oauth" as const, imapAccounts: [] })),
+    .default(() => ({ mode: "oauth" as const })),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -36,12 +31,11 @@ export type Account = z.infer<typeof AccountSchema>;
 // Legacy single-account shape (pre multi-account). Used only for migration.
 type LegacyShape = {
   qq?: { email?: string; accounts?: unknown };
-  outlook?: { imapEmail?: string; imapAccounts?: unknown };
+  outlook?: { mode?: string; imapEmail?: string; imapAccounts?: unknown; clientId?: unknown };
 };
 
-// Migrate the old single-value fields (qq.email / outlook.imapEmail) into the
-// new account arrays. Returns true if anything changed, so the caller can
-// persist the upgraded config back to disk.
+// Migrate old config shapes and remove retired Outlook IMAP fields. Returns true
+// if anything changed, so the caller can persist the upgraded config back to DB.
 function migrateLegacy(raw: any): boolean {
   if (!raw || typeof raw !== "object") return false;
   let changed = false;
@@ -52,14 +46,24 @@ function migrateLegacy(raw: any): boolean {
     delete raw.qq.email;
     changed = true;
   }
-  if (
-    legacy.outlook &&
-    typeof legacy.outlook.imapEmail === "string" &&
-    !Array.isArray(legacy.outlook.imapAccounts)
-  ) {
-    raw.outlook.imapAccounts = [{ email: legacy.outlook.imapEmail }];
-    delete raw.outlook.imapEmail;
-    changed = true;
+
+  if (legacy.outlook && typeof legacy.outlook === "object") {
+    if (legacy.outlook.mode !== "oauth") {
+      raw.outlook.mode = "oauth";
+      changed = true;
+    }
+    if ("imapEmail" in legacy.outlook) {
+      delete raw.outlook.imapEmail;
+      changed = true;
+    }
+    if ("imapAccounts" in legacy.outlook) {
+      delete raw.outlook.imapAccounts;
+      changed = true;
+    }
+    if ("clientId" in legacy.outlook) {
+      delete raw.outlook.clientId;
+      changed = true;
+    }
   }
   return changed;
 }

@@ -27,9 +27,8 @@ Two ways to connect:
 
 ## Features
 
-- **Mailboxes**: QQ Mail (IMAP auth code), Outlook (OAuth device-code flow —
-  recommended) or Outlook (IMAP app password). Multiple accounts run in
-  parallel.
+- **Mailboxes**: QQ Mail (IMAP auth code) and Outlook (OAuth device-code flow).
+  Multiple accounts run in parallel.
 - **OTP extraction**: keyword + scoring match for 4–8 digit codes (中/English
   keywords), with automatic validity-window detection (10s–24h).
 - **Hotkey autofill**: `⌘/Ctrl + Shift + .` finds the OTP input and fills it; a
@@ -45,9 +44,9 @@ Two ways to connect:
 
 ## Status
 
-Beyond MVP: QQ IMAP, Outlook OAuth (Graph device-code) and Outlook IMAP are all
-working; multi-tenant with SQLite-backed persistence and at-rest credential
-encryption; one-command Docker deploy.
+Beyond MVP: QQ IMAP and Outlook OAuth (Graph device-code) are working;
+multi-tenant with SQLite-backed persistence and at-rest credential encryption;
+one-command Docker deploy.
 
 ## Load the extension
 
@@ -76,7 +75,6 @@ select the `chrome-extension/` folder.
 
 - **QQ 邮箱（IMAP）**：登录 [QQ 邮箱网页版](https://mail.qq.com) → 设置 → 账号 → 开启「IMAP/SMTP 服务」→ 按提示短信验证 → 得到 **授权码**（不是登录密码）。把 QQ 邮箱和授权码填入设置页 → `保存 QQ`。
 - **Outlook（OAuth，推荐）**：在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) 新建注册（账户类型选「Personal Microsoft accounts only」）→ Authentication → Add a platform → Mobile and desktop applications → 选择或填写 `https://login.microsoftonline.com/common/oauth2/nativeclient` → 将「Allow public client flows」设为 Yes → 复制 Application (client) ID 填入 → `保存 Client ID` → `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
-- **Outlook（IMAP）**：在设置页把模式切到 IMAP，填邮箱 + 应用专用密码 → `保存 Outlook IMAP`。
 
 > 已保存的授权码/密码下次打开设置页会以圆点（••••）回填，点字段右侧的**小眼睛**即可查看明文。
 
@@ -148,8 +146,8 @@ Then set the extension's **Agent Base URL** to your public address.
 
 ## Secrets storage
 
-Email credentials (QQ auth code / Outlook app password / OAuth tokens) are
-stored encrypted in the SQLite DB under the `data/` volume using **AES-256-GCM**,
+Email credentials (QQ auth code / Outlook OAuth tokens) are stored encrypted in
+the SQLite DB under the `data/` volume using **AES-256-GCM**,
 with the key derived (scrypt) from `OTP_AGENT_MASTER_KEY`. The master key is
 only read from the environment and is never written to disk — a leaked database
 is useless without it.
