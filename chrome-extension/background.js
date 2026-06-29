@@ -44,7 +44,11 @@ async function agentFetch(path, init = {}) {
   return json;
 }
 
-async function fetchLatestOtpForTab(tabUrl) {
+// Fetch all currently-valid OTPs for the active tab, best match first. Returns
+// both the top pick (`item`) and the full list (`items`) so the popup can page
+// through multiple in-window codes. Falls back to wrapping a lone `item` for
+// older agents that don't return `items`.
+async function fetchOtpsForTab(tabUrl) {
   const s = await getSettings();
   let domain = "";
   try {
@@ -57,7 +61,14 @@ async function fetchLatestOtpForTab(tabUrl) {
   if (domain) q.set("domain", domain);
   if (s.providers && s.providers.length) q.set("providers", s.providers.join(","));
   const json = await agentFetch(`/v1/otp/latest?${q.toString()}`, { method: "GET" });
-  return json.item || null;
+  const item = json.item || null;
+  const items = Array.isArray(json.items) ? json.items : item ? [item] : [];
+  return { item, items };
+}
+
+async function fetchLatestOtpForTab(tabUrl) {
+  const { item } = await fetchOtpsForTab(tabUrl);
+  return item;
 }
 
 // --- New-OTP badge on the toolbar icon -------------------------------------
@@ -131,19 +142,26 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 ensurePollAlarm();
 pollForNewOtp();
 
-async function fillOnActiveTab() {
+// Fill the OTP on the active tab. `codeOverride` lets the popup fill the code
+// the user is currently viewing (which may not be the newest one when paging
+// through multiple valid codes); without it we fall back to the latest pick.
+async function fillOnActiveTab(codeOverride) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.id) return { ok: false, error: "no_active_tab" };
 
   const lang = await getUiLang();
 
-  const otp = await fetchLatestOtpForTab(tab.url || "");
-  if (!otp || !otp.code) {
+  let code = typeof codeOverride === "string" ? codeOverride.replace(/\D/g, "") : "";
+  if (!code) {
+    const otp = await fetchLatestOtpForTab(tab.url || "");
+    code = otp && otp.code ? otp.code : "";
+  }
+  if (!code) {
     await chrome.tabs.sendMessage(tab.id, { type: "OTP_TOAST", level: "info", message: t(lang, "toast_no_otp") });
     return { ok: false, error: "no_otp" };
   }
 
-  const result = await chrome.tabs.sendMessage(tab.id, { type: "OTP_FILL", code: otp.code });
+  const result = await chrome.tabs.sendMessage(tab.id, { type: "OTP_FILL", code });
   if (result && result.ok) {
     // Reason: we intentionally do NOT consume the OTP here. The code must stay
     // visible in the popup for its whole validity window (maxAgeSec) even after
@@ -173,15 +191,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
     if (msg.type === "BG_FETCH_LATEST") {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const otp = await fetchLatestOtpForTab((tab && tab.url) || "");
+      const { item, items } = await fetchOtpsForTab((tab && tab.url) || "");
       // Opening the popup counts as seeing the latest codes — clear the badge.
       await markAllOtpSeen();
-      sendResponse({ ok: true, otp });
+      sendResponse({ ok: true, otp: item, otps: items });
       return;
     }
 
     if (msg.type === "BG_FILL_NOW") {
-      const r = await fillOnActiveTab();
+      const r = await fillOnActiveTab(typeof msg.code === "string" ? msg.code : undefined);
       sendResponse(r);
       return;
     }
@@ -256,7 +274,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "BG_REVEAL_SECRET") {
       const json = await agentFetch("/v1/secret/reveal", {
         method: "POST",
-        body: JSON.stringify({ kind: msg.kind, email: msg.email })
+        body: JSON.stringify({ kind: "qq", email: msg.email })
       });
       sendResponse({ ok: true, value: json.value });
       return;

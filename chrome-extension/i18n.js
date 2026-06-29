@@ -116,6 +116,8 @@
       copy: "Copy",
       settings: "Settings",
       source: "Source",
+      prev_otp: "Previous code",
+      next_otp: "Next code",
       expires_in_sec: "valid for {n}s",
       otp_expired: "Expired",
       fill_failed_manual: "Autofill failed — please copy and paste manually.",
@@ -257,6 +259,8 @@
       copy: "复制",
       settings: "设置",
       source: "来源",
+      prev_otp: "上一个验证码",
+      next_otp: "下一个验证码",
       expires_in_sec: "{n} 秒后过期",
       otp_expired: "已过期",
       fill_failed_manual: "填充失败，请手动复制粘贴。",
@@ -357,6 +361,9 @@
     });
     root.querySelectorAll("[data-i18n-ph]").forEach((el) => {
       el.setAttribute("placeholder", t(lang, el.getAttribute("data-i18n-ph")));
+    });
+    root.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+      el.setAttribute("aria-label", t(lang, el.getAttribute("data-i18n-aria")));
     });
   }
 

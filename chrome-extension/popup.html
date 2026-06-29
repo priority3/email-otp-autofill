@@ -28,7 +28,12 @@
             <span id="sourceIcon" class="source-icon">📩</span>
             <span id="sourceName">QQ</span>
           </div>
-          <div id="code" class="code copyable" title="Click to copy">------</div>
+          <div class="otp-code-row">
+            <button id="otpPrev" class="otp-nav" type="button" hidden aria-label="Previous code" data-i18n-aria="prev_otp">‹</button>
+            <div id="code" class="code copyable" title="Click to copy">------</div>
+            <button id="otpNext" class="otp-nav" type="button" hidden aria-label="Next code" data-i18n-aria="next_otp">›</button>
+          </div>
+          <div id="otpIndicator" class="otp-indicator" hidden></div>
           <div id="otpBar" class="otp-bar" aria-hidden="true" hidden>
             <div id="otpBarFill" class="otp-bar-fill"></div>
           </div>

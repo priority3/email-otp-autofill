@@ -212,8 +212,10 @@ export async function startServer() {
     const domain = typeof req.query.domain === "string" ? req.query.domain : undefined;
     const account = typeof req.query.account === "string" ? req.query.account : undefined;
     const providers = parseProviders(typeof req.query.providers === "string" ? req.query.providers : undefined);
-    const item = store.latest({ userId, providers, account, maxAgeMs, domain });
-    res.json({ ok: true, item });
+    // Reason: return the full valid list (best-first) so the popup can let the
+    // user page through multiple in-window codes; `item` stays for compatibility.
+    const items = store.validList({ userId, providers, account, maxAgeMs, domain });
+    res.json({ ok: true, item: items[0] ?? null, items });
   });
 
   app.post("/v1/otp/consume", (req, res) => {
