@@ -120,6 +120,7 @@
             <select id="acctType">
               <option value="qq" data-i18n="type_qq">QQ Mail (IMAP)</option>
               <option value="outlook_oauth" data-i18n="type_outlook_oauth">Outlook (OAuth)</option>
+              <option value="gmail_oauth" data-i18n="type_gmail_oauth">Gmail (OAuth)</option>
             </select>
 
             <!-- QQ fields (shown when type=qq) -->
@@ -155,6 +156,21 @@
               </div>
               <div class="hint" id="deviceCodeMsg"></div>
               <span id="outlookOauthMsg" class="status-msg"></span>
+            </div>
+
+            <!-- Gmail OAuth fields (shown when type=gmail_oauth) -->
+            <div id="gmailOauthFields" hidden>
+              <div id="gmailState" class="card-sub" data-i18n="oauth_not_connected">OAuth not connected</div>
+
+              <div class="row" style="margin-top:12px;" id="gmailDisconnectedActions">
+                <button id="gmailAuthStart" class="primary" data-i18n="start_signin">Start Sign-in</button>
+                <button id="gmailClear" class="danger" data-i18n="clear">Clear</button>
+              </div>
+              <div class="row" style="margin-top:12px;" id="gmailConnectedActions" hidden>
+                <button id="gmailDisconnect" class="danger" data-i18n="disconnect">Disconnect</button>
+              </div>
+              <div class="hint" id="gmailDeviceCodeMsg"></div>
+              <span id="gmailOauthMsg" class="status-msg"></span>
             </div>
 
             <div class="row" style="margin-top:12px;" id="acctActions">
