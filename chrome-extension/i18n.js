@@ -55,6 +55,7 @@
       account_type: "Account type",
       type_qq: "QQ Mail (IMAP)",
       type_outlook_oauth: "Outlook (OAuth)",
+      type_gmail_oauth: "Gmail (OAuth)",
       remove_account: "Remove",
       removing: "Removing…",
       no_account_selected: "No account selected",

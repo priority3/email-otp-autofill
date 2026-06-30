@@ -28,6 +28,13 @@ let oauthPollExpiresAt = 0;
 let oauthPollInFlight = false;
 let oauthPollRunId = 0;
 
+// Gmail OAuth polling state (mirrors Outlook).
+let gmailPollTimer = null;
+let gmailPollDelayMs = 5000;
+let gmailPollExpiresAt = 0;
+let gmailPollInFlight = false;
+let gmailPollRunId = 0;
+
 // ---- password eye toggle (unchanged behavior) ----------------------------
 const EYE_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -187,6 +194,11 @@ function selectAccount(acc) {
     $("acctTitle").querySelector("span:last-child").textContent = acc.email || "Outlook OAuth";
     renderAccountFormByType("outlook_oauth");
     showPanel("panelAccount");
+  } else if (acc.type === "gmail_oauth") {
+    // Gmail OAuth: show the OAuth panel with connect/clear actions
+    $("acctTitle").querySelector("span:last-child").textContent = acc.email || "Gmail OAuth";
+    renderAccountFormByType("gmail_oauth");
+    showPanel("panelAccount");
   } else {
     // QQ account: show the edit form
     $("acctTitle").querySelector("span:last-child").textContent = acc.email;
@@ -207,19 +219,26 @@ function setText(id, text) {
   if (el && text != null) el.textContent = text;
 }
 
-// Toggle form fields for QQ vs Outlook OAuth.
+// Toggle form fields for QQ vs Outlook OAuth vs Gmail OAuth.
 async function renderAccountFormByType(type) {
   const isQq = type === "qq";
+  const isOutlook = type === "outlook_oauth";
+  const isGmail = type === "gmail_oauth";
   $("qqFields").hidden = !isQq;
-  $("outlookOauthFields").hidden = isQq;
-  // Keep acctActions visible for both types; hide Save for OAuth (it's a no-op).
+  $("outlookOauthFields").hidden = !isOutlook;
+  $("gmailOauthFields").hidden = !isGmail;
+  // Keep acctActions visible for all types; hide Save for OAuth types.
   $("acctActions").hidden = false;
   $("acctSave").hidden = !isQq;
   $("acctRemove").hidden = true; // only shown for existing QQ accounts via selectAccount
-  if (!isQq) {
+  if (isOutlook) {
     // Switch user to OAuth mode on the server, then refresh state.
     try { await bg({ type: "BG_OUTLOOK_CONFIG", payload: { mode: "oauth" } }); } catch { /* ignore */ }
     await refreshOutlookOAuthState();
+  }
+  if (isGmail) {
+    try { await bg({ type: "BG_GMAIL_CONFIG", payload: { mode: "oauth" } }); } catch { /* ignore */ }
+    await refreshGmailOAuthState();
   }
 }
 
@@ -228,6 +247,19 @@ function toggleOutlookActions(connected) {
   const con = $("outlookConnectedActions");
   // Reason: `.row { display:flex }` can override `[hidden]`, so we drive both
   // the attribute and inline display to keep the OAuth action groups in sync.
+  if (dis) {
+    dis.hidden = connected;
+    dis.style.display = connected ? "none" : "";
+  }
+  if (con) {
+    con.hidden = !connected;
+    con.style.display = connected ? "" : "none";
+  }
+}
+
+function toggleGmailActions(connected) {
+  const dis = $("gmailDisconnectedActions");
+  const con = $("gmailConnectedActions");
   if (dis) {
     dis.hidden = connected;
     dis.style.display = connected ? "none" : "";
@@ -247,6 +279,20 @@ async function refreshOutlookOAuthState() {
       setMsg("outlookState", T(connected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
       // Toggle action groups: Start/Clear when disconnected, Disconnect when connected.
       toggleOutlookActions(connected);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function refreshGmailOAuthState() {
+  try {
+    const r = await bg({ type: "BG_AGENT_STATUS" });
+    if (r && r.ok && r.status && r.status.config) {
+      const gm = r.status.config.gmail || {};
+      const connected = !!gm.oauthConnected;
+      setMsg("gmailState", T(connected ? "oauth_connected" : (gm.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
+      toggleGmailActions(connected);
     }
   } catch {
     // ignore
@@ -524,11 +570,18 @@ async function refreshStatus() {
     if (ol.oauthConnected) {
       next.push({ type: "outlook_oauth", email: ol.oauthEmail || "Outlook OAuth", configured: !!ol.oauthConnected });
     }
+    // Gmail OAuth is a single account.
+    const gm = cfg.gmail || {};
+    if (gm.oauthConnected) {
+      next.push({ type: "gmail_oauth", email: gm.oauthEmail || "Gmail OAuth", configured: !!gm.oauthConnected });
+    }
     accounts = next;
     renderAccountList();
 
     // Sync Outlook OAuth action buttons with connection state.
     toggleOutlookActions(!!ol.oauthConnected);
+    // Sync Gmail OAuth action buttons with connection state.
+    toggleGmailActions(!!gm.oauthConnected);
   } catch (e) {
     setAgentStatus(false, String(e && e.message ? e.message : e));
     accounts = [];
@@ -739,6 +792,135 @@ function wireOauth() {
   });
 }
 
+function stopGmailAutoPoll() {
+  gmailPollRunId++;
+  if (gmailPollTimer) clearTimeout(gmailPollTimer);
+  gmailPollTimer = null;
+  gmailPollInFlight = false;
+  gmailPollExpiresAt = 0;
+  const start = $("gmailAuthStart");
+  if (start) start.disabled = false;
+}
+
+function scheduleGmailAutoPoll(runId, delayMs = gmailPollDelayMs) {
+  if (gmailPollTimer) clearTimeout(gmailPollTimer);
+  gmailPollTimer = setTimeout(() => void pollGmailAuthOnce(runId), Math.max(1000, delayMs));
+}
+
+async function pollGmailAuthOnce(runId) {
+  if (runId !== gmailPollRunId) return;
+  if (gmailPollInFlight) return;
+  if (gmailPollExpiresAt && Date.now() >= gmailPollExpiresAt) {
+    stopGmailAutoPoll();
+    setMsg("gmailOauthMsg", T("expired"));
+    await refreshStatus();
+    return;
+  }
+
+  gmailPollInFlight = true;
+  try {
+    const r = await bg({ type: "BG_GMAIL_AUTH_POLL" });
+    if (runId !== gmailPollRunId) return;
+    if (!r || !r.ok) {
+      stopGmailAutoPoll();
+      setMsg("gmailOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+      return;
+    }
+
+    const result = r.result;
+    if (result.status === "success") {
+      stopGmailAutoPoll();
+      setMsg("gmailOauthMsg", T("connected"));
+      toggleGmailActions(true);
+      await refreshStatus();
+      await refreshGmailOAuthState();
+      setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+      return;
+    }
+    if (result.status === "expired") {
+      stopGmailAutoPoll();
+      setMsg("gmailOauthMsg", T("expired"));
+      await refreshStatus();
+      return;
+    }
+
+    if (result.error === "slow_down") gmailPollDelayMs += 5000;
+    setMsg("gmailOauthMsg", T("oauth_waiting", { sec: Math.round(gmailPollDelayMs / 1000) }));
+    scheduleGmailAutoPoll(runId);
+  } catch (e) {
+    if (runId !== gmailPollRunId) return;
+    stopGmailAutoPoll();
+    setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+  } finally {
+    if (runId === gmailPollRunId) gmailPollInFlight = false;
+  }
+}
+
+function wireGmailOauth() {
+  $("gmailAuthStart").addEventListener("click", async () => {
+    stopGmailAutoPoll();
+    const runId = ++gmailPollRunId;
+    setMsg("gmailDeviceCodeMsg", T("starting"));
+    setMsg("gmailOauthMsg", "");
+    $("gmailAuthStart").disabled = true;
+    try {
+      const r = await bg({ type: "BG_GMAIL_AUTH_START" });
+      if (runId !== gmailPollRunId) return;
+      if (!r || !r.ok) {
+        stopGmailAutoPoll();
+        setMsg("gmailDeviceCodeMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+        return;
+      }
+      const dc = r.deviceCode;
+      const link = dc.verification_uri_complete || dc.verification_uri;
+      gmailPollDelayMs = Math.max(1, Number(dc.interval) || 5) * 1000;
+      gmailPollExpiresAt = Date.now() + Math.max(1, Number(dc.expires_in) || 900) * 1000;
+      setMsg("gmailDeviceCodeMsg", T("device_code_msg", { uri: dc.verification_uri, code: dc.user_code, sec: dc.expires_in }));
+      setMsg("gmailOauthMsg", T("oauth_waiting", { sec: Math.round(gmailPollDelayMs / 1000) }));
+      if (link) {
+        chrome.windows.create({ url: link, type: "popup", width: 500, height: 700 });
+      }
+      scheduleGmailAutoPoll(runId, gmailPollDelayMs);
+    } catch (e) {
+      if (runId !== gmailPollRunId) return;
+      stopGmailAutoPoll();
+      setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+  });
+
+  $("gmailClear").addEventListener("click", async () => {
+    stopGmailAutoPoll();
+    setMsg("gmailOauthMsg", T("clearing"));
+    try {
+      const r = await bg({ type: "BG_GMAIL_CLEAR" });
+      setMsg("gmailOauthMsg", r && r.ok ? T("cleared") : T("failed"));
+      await refreshStatus();
+      if (r && r.ok) {
+        selected = null;
+        setNavActive(null);
+        showPanel("panelEmpty");
+      }
+    } catch (e) {
+      setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+    setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+  });
+
+  $("gmailDisconnect").addEventListener("click", async () => {
+    stopGmailAutoPoll();
+    setMsg("gmailOauthMsg", T("clearing"));
+    try {
+      const r = await bg({ type: "BG_GMAIL_CLEAR" });
+      setMsg("gmailOauthMsg", r && r.ok ? T("cleared") : T("failed"));
+      await refreshStatus();
+      await refreshGmailOAuthState();
+    } catch (e) {
+      setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+    setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+  });
+}
+
 // ---- boot ----------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
   LANG = await getUiLang();
@@ -783,6 +965,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   wireOauth();
+  wireGmailOauth();
   initPwdToggles();
 
   // Note: the default detail panel is selected inside refreshStatus() only after

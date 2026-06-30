@@ -23,6 +23,11 @@ const ConfigSchema = z.object({
       mode: z.literal("oauth").default("oauth"),
     })
     .default(() => ({ mode: "oauth" as const })),
+  gmail: z
+    .object({
+      mode: z.literal("oauth").default("oauth"),
+    })
+    .default(() => ({ mode: "oauth" as const })),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -32,6 +37,7 @@ export type Account = z.infer<typeof AccountSchema>;
 type LegacyShape = {
   qq?: { email?: string; accounts?: unknown };
   outlook?: { mode?: string; imapEmail?: string; imapAccounts?: unknown; clientId?: unknown };
+  gmail?: { mode?: string };
 };
 
 // Migrate old config shapes and remove retired Outlook IMAP fields. Returns true

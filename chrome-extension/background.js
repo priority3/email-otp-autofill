@@ -306,6 +306,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: true, result: json.result });
       return;
     }
+
+    // --- Gmail OAuth ---
+    if (msg.type === "BG_GMAIL_CONFIG") {
+      const json = await agentFetch("/v1/gmail/config", {
+        method: "POST",
+        body: JSON.stringify(msg.payload || {})
+      });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    if (msg.type === "BG_GMAIL_CLEAR") {
+      const json = await agentFetch("/v1/gmail/clear", { method: "POST", body: JSON.stringify({}) });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    if (msg.type === "BG_GMAIL_AUTH_START") {
+      const json = await agentFetch("/v1/gmail/auth/start", { method: "POST", body: JSON.stringify({}) });
+      sendResponse({ ok: true, deviceCode: json.deviceCode });
+      return;
+    }
+
+    if (msg.type === "BG_GMAIL_AUTH_POLL") {
+      const json = await agentFetch("/v1/gmail/auth/poll", { method: "POST", body: JSON.stringify({}) });
+      sendResponse({ ok: true, result: json.result });
+      return;
+    }
   })()
     .catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
 
