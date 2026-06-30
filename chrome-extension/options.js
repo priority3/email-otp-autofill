@@ -268,6 +268,19 @@ function setAgentStatus(ok, detail) {
   setMsg("agentStatus", T(ok ? "agent_ok_detail" : "agent_down_detail", { detail: detail || "" }));
 }
 
+// Label for the connected agent: the host (and port, if non-default) of the
+// configured base URL — i.e. the domain the user logged in with, not the
+// server's internal bind address (which is always 0.0.0.0:17373 in Docker).
+async function connectedHostLabel() {
+  const raw = await chrome.storage.local.get(["agentBaseUrl"]);
+  try {
+    const u = new URL(raw.agentBaseUrl || DEFAULT_BASE_URL);
+    return u.host; // host includes the port when it's non-standard
+  } catch {
+    return raw.agentBaseUrl || DEFAULT_BASE_URL;
+  }
+}
+
 function originPatternFromBaseUrl(baseUrl) {
   try {
     const u = new URL(baseUrl);
@@ -497,7 +510,9 @@ async function refreshStatus() {
       selectAgent();
     }
 
-    setAgentStatus(true, `${r.status.agent.host}:${r.status.agent.port}`);
+    // Show the address the user actually connected to (the configured base URL
+    // host), not the agent's internal bind address (e.g. 0.0.0.0:17373).
+    setAgentStatus(true, await connectedHostLabel());
     const cfg = r.status.config || {};
 
     // Build the flat account list from qq accounts + outlook oauth.
