@@ -291,7 +291,7 @@ async function refreshGmailOAuthState() {
     if (r && r.ok && r.status && r.status.config) {
       const gm = r.status.config.gmail || {};
       const connected = !!gm.oauthConnected;
-      setMsg("gmailState", T(connected ? "oauth_connected" : (gm.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
+      setMsg("gmailState", T(connected ? "oauth_connected" : (gm.clientIdSet ? "oauth_not_connected" : "gmail_no_client_id")));
       toggleGmailActions(connected);
     }
   } catch {
