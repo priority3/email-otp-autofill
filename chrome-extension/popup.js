@@ -12,6 +12,7 @@ let countdownTimer = null;
 // The user can page left/right through them; index 0 is the autofill default.
 let otpList = [];
 let currentIndex = 0;
+const SELECTED_OTP_KEY = "selectedOtpId";
 
 // Human-facing provider label + icon for the source tag.
 const PROVIDER_META = {
@@ -56,6 +57,27 @@ async function getMaxAgeMs() {
     return (Number.isFinite(n) ? Math.max(10, Math.min(600, n)) : 120) * 1000;
   } catch {
     return 120_000;
+  }
+}
+
+async function getSelectedOtpId() {
+  try {
+    const { [SELECTED_OTP_KEY]: selectedOtpId } = await chrome.storage.local.get([SELECTED_OTP_KEY]);
+    return typeof selectedOtpId === "string" ? selectedOtpId : "";
+  } catch {
+    return "";
+  }
+}
+
+async function setSelectedOtpId(id) {
+  try {
+    if (id) {
+      await chrome.storage.local.set({ [SELECTED_OTP_KEY]: id });
+    } else {
+      await chrome.storage.local.remove(SELECTED_OTP_KEY);
+    }
+  } catch {
+    // Ignore storage failures; selection still works for the current popup.
   }
 }
 
@@ -115,6 +137,7 @@ function goTo(delta) {
   if (n <= 1) return;
   currentIndex = (currentIndex + delta + n) % n;
   renderCurrent();
+  void setSelectedOtpId(currentOtp && currentOtp.id ? currentOtp.id : "");
 }
 
 // Drive the validity bar. The window prefers the TTL parsed from the email
@@ -170,6 +193,7 @@ async function refresh() {
   const meta = $("meta");
   if (meta) meta.classList.remove("meta-error");
   maxAgeMs = await getMaxAgeMs();
+  const savedSelectedOtpId = await getSelectedOtpId();
 
   // Agent status first — drives the dot and the multi-tenant login gate.
   let needLogin = false;
@@ -207,12 +231,14 @@ async function refresh() {
     const prevId = currentOtp && currentOtp.id;
     otpList = list;
     currentIndex = 0;
-    if (prevId) {
-      const idx = otpList.findIndex((o) => o && o.id === prevId);
+    const preferredId = savedSelectedOtpId || prevId;
+    if (preferredId) {
+      const idx = otpList.findIndex((o) => o && o.id === preferredId);
       if (idx >= 0) currentIndex = idx;
     }
     if (otpList.length) {
       renderCurrent();
+      void setSelectedOtpId(currentOtp && currentOtp.id ? currentOtp.id : "");
     } else {
       currentOtp = null;
       stopCountdown();
@@ -221,6 +247,7 @@ async function refresh() {
       renderNav();
       $("otpBar").hidden = true;
       setText("meta", formatMeta(null));
+      await setSelectedOtpId("");
     }
   } catch (e) {
     currentOtp = null;
@@ -300,8 +327,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("otpPrev").addEventListener("click", () => goTo(-1));
   $("otpNext").addEventListener("click", () => goTo(1));
   document.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowLeft") goTo(-1);
-    else if (e.key === "ArrowRight") goTo(1);
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      goTo(-1);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      goTo(1);
+    }
   });
 
   $("settings").addEventListener("click", () => {

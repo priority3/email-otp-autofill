@@ -29,6 +29,11 @@ type OAuthErrorResponse = {
   error_description?: string;
 };
 
+type GraphMessageBody = {
+  contentType?: string;
+  content?: string;
+};
+
 const DEVICE_CODE_SCOPE = "offline_access Mail.Read User.Read openid profile email";
 const REFRESH_SCOPE = "offline_access Mail.Read";
 
@@ -64,6 +69,21 @@ function decodeJwtPayload(token: string | undefined): Record<string, unknown> | 
 function claimString(claims: Record<string, unknown> | null, key: string): string {
   const value = claims?.[key];
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ");
+}
+
+function graphBodyText(body: unknown): string {
+  if (!body || typeof body !== "object") return "";
+  const b = body as GraphMessageBody;
+  const content = String(b.content || "").trim();
+  if (!content) return "";
+  return String(b.contentType || "").toLowerCase() === "html" ? stripHtml(content) : content;
 }
 
 export class OutlookOAuthProvider {
@@ -260,7 +280,7 @@ export class OutlookOAuthProvider {
     try {
       const token = await this.ensureAccessToken();
       const url =
-        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$orderby=receivedDateTime%20desc&$select=id,subject,from,receivedDateTime,bodyPreview";
+        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$orderby=receivedDateTime%20desc&$select=id,subject,from,receivedDateTime,bodyPreview,body";
       const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`graph_list_failed:${res.status}`);
       const json = (await res.json()) as { value?: any[] };
@@ -269,8 +289,6 @@ export class OutlookOAuthProvider {
       for (const msg of msgs) {
         const id = String(msg.id || "");
         if (!id || this.seenIds.has(id)) continue;
-        this.seenIds.add(id);
-        if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
 
         const receivedAt = msg.receivedDateTime ? Date.parse(String(msg.receivedDateTime)) : now;
         if (!Number.isFinite(receivedAt)) continue;
@@ -280,7 +298,10 @@ export class OutlookOAuthProvider {
         const from =
           msg.from?.emailAddress?.address || msg.from?.emailAddress?.name || (msg.from ? String(msg.from) : "");
         const preview = String(msg.bodyPreview || "");
-        const best = extractBestOtp(`${subject}\n${preview}`);
+        const bodyText = graphBodyText(msg.body);
+        const best = extractBestOtp(`${subject}\n${preview}\n${bodyText}`);
+        this.seenIds.add(id);
+        if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
         if (!best) continue;
 
         this.store.add({
