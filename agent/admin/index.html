@@ -228,15 +228,15 @@
 
           <h2 style="margin-top:22px;">📨 Outlook OAuth</h2>
           <div class="msg" style="margin-bottom:4px;">
-            在 Azure 注册一个支持「个人 Microsoft 账户」的应用，把它配置为 Mobile/Desktop public client，
+            在 Azure 注册一个支持「任何 Entra ID 租户 + 个人 Microsoft 账户」的应用，把它配置为 Mobile/Desktop public client，
             再把 Application (client) ID 填入此处。所有用户的 Outlook 授权登录共用它。
           </div>
           <div class="msg" style="margin-bottom:8px;">
             📌 获取步骤：打开
             <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener" style="color:var(--accent);">Azure 门户 · 应用注册</a>
-            → New registration → Supported account types 选「Personal Microsoft accounts only」→
-            注册后进入 Authentication → Add a platform → Mobile and desktop applications →
-            选择或填写 https://login.microsoftonline.com/common/oauth2/nativeclient →
+            → New registration → 支持的账户类型选「任何组织目录(任何 Entra ID 租户)中的账户和个人 Microsoft 账户」→
+            注册后进入 Authentication → 添加平台(Add a platform) → 移动和桌面应用程序(Mobile and desktop applications) →
+            添加重定向 URL https://login.microsoftonline.com/common/oauth2/nativeclient →
             将「Allow public client flows」设为 Yes → 复制「Application (client) ID」填入下方。
           </div>
           <label for="outlookClientId">Microsoft App Client ID</label>

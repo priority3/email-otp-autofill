@@ -1,14 +1,22 @@
 # Email OTP Autofill
 
+**English** | [中文](README.zh-CN.md)
+
 Fetch email one-time passcodes (OTP) from QQ Mail / Outlook and autofill them
 into the current page with a hotkey — via a local/self-hosted **agent** plus a
 Chrome (MV3) **extension**.
+
+> wip: Google, self-hosted, ...
 
 ## How it works
 
 The Chrome extension polls an **agent** service. The agent connects to your
 mailbox over IMAP / OAuth, extracts the latest verification code, and the
 extension fills it into the focused input when you press the hotkey.
+
+| Popup | Settings |
+| --- | --- |
+| ![Extension popup showing a fetched OTP](docs/screenshots/popup.png) | ![Extension settings with agent status and mailbox accounts](docs/screenshots/settings.png) |
 
 Two ways to connect:
 
@@ -53,46 +61,69 @@ one-command Docker deploy.
 Chrome → `chrome://extensions` → enable Developer Mode → **Load unpacked** →
 select the `chrome-extension/` folder.
 
-## Use the public instance (no setup)
+## Usage
 
-1. Load the extension (above).
-2. Open the extension's **Settings** — the Agent is pre-set to
-   `https://otp.razet.me`.
-3. **Register / log in** (the public instance is multi-tenant, so login is
-   required; enter an invite code if the instance has invite-only signup on).
-4. Configure a mailbox and use it — see below.
+### 0. Log in
 
-## 使用方法 (Usage)
+In the Settings page, **register or log in** at the top "account" area; once
+signed in the extension attaches your session credentials when talking to the
+agent. (If the instance has invite-only signup enabled, enter the invite code
+issued by the admin when registering.)
 
-### 0. 登录
+### 1. Configure a mailbox (in the extension's Settings)
 
-设置页顶部「账号」区**注册或登录**；成功后扩展会带上你的会话凭据访问 agent。
-（若实例开启了「邀请码注册」，注册时需填管理员发放的邀请码。）
+Click the extension icon → `Settings`. Confirm the `Agent` status at the top is
+**OK**.
 
-### 1. 配置邮箱（在扩展的「设置」页）
+> As in the **Settings screenshot**: the left "mailbox accounts" column lists
+> connected accounts (green dot = online); the right "Agent" panel shows the
+> connection address and status, and lets you set the OTP "validity (seconds)".
+> Click "Add account" to configure a new mailbox.
 
-点击扩展图标 → `设置`（Settings）。顶部确认 `Agent` 状态为 **正常 / OK**。
+- **QQ Mail (IMAP)**: log in to [QQ Mail web](https://mail.qq.com) → Settings →
+  Account → enable "IMAP/SMTP service" → complete the SMS verification → obtain
+  an **auth code** (not your login password). Enter the QQ address and auth code
+  in Settings → `Save QQ`.
+- **Outlook (OAuth, recommended)**: in the
+  [Azure portal · App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+  create a new registration (account type "Personal Microsoft accounts only") →
+  Authentication → Add a platform → Mobile and desktop applications → select or
+  enter `https://login.microsoftonline.com/common/oauth2/nativeclient` → set
+  "Allow public client flows" to Yes → copy the Application (client) ID and paste
+  it in → `Save Client ID` → `Start login`, follow the device-code prompt to
+  authorize in your browser → `Poll` to confirm the connection.
 
-- **QQ 邮箱（IMAP）**：登录 [QQ 邮箱网页版](https://mail.qq.com) → 设置 → 账号 → 开启「IMAP/SMTP 服务」→ 按提示短信验证 → 得到 **授权码**（不是登录密码）。把 QQ 邮箱和授权码填入设置页 → `保存 QQ`。
-- **Outlook（OAuth，推荐）**：在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) 新建注册（账户类型选「Personal Microsoft accounts only」）→ Authentication → Add a platform → Mobile and desktop applications → 选择或填写 `https://login.microsoftonline.com/common/oauth2/nativeclient` → 将「Allow public client flows」设为 Yes → 复制 Application (client) ID 填入 → `保存 Client ID` → `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
+> A saved auth code/password is masked with dots (••••) the next time you open
+> Settings; click the **eye** icon at the right of the field to reveal it.
 
-> 已保存的授权码/密码下次打开设置页会以圆点（••••）回填，点字段右侧的**小眼睛**即可查看明文。
+### 2. Everyday use
 
-### 2. 日常使用
+1. Click "Send code" on the web page. When the email arrives, the extension's
+   toolbar icon shows a **red badge** indicating a fresh code (checked ~every
+   30s).
+2. **Click into the page's OTP input**, then press the hotkey to fill:
+   - macOS: `⌘ + Shift + .`
+   - Windows/Linux: `Ctrl + Shift + .`
 
-1. 在网页上点「发送验证码」，邮件到达后，扩展工具栏图标会出现**红色角标**提示有新验证码（每 ~30 秒检查一次）。
-2. **把光标点进网页的验证码输入框**，按快捷键填充：
-   - macOS：`⌘ + Shift + .`
-   - Windows/Linux：`Ctrl + Shift + .`
+   (The shortcut can be changed at `chrome://extensions/shortcuts`.)
+3. Or click the extension icon and, once the code is shown in the popup, click
+   `Fill` / `Copy`.
 
-   （快捷键可在 `chrome://extensions/shortcuts` 修改。）
-3. 或者点扩展图标，在弹窗里看到验证码后点 `填充` / `复制`。
+> As in the **Popup screenshot**: the top of the popup shows the source mailbox
+> (e.g. `Outlook`) and the code; the line below gives "arrival time · sender
+> address · time remaining". If multiple valid codes exist at once, page through
+> them with `‹ ›` (`1 / 2`); the progress bar shows the current code's remaining
+> validity. `Agent: OK` at the bottom means the connection to the agent is
+> healthy.
 
-填充后角标自动清除；验证码默认只在到达后 **120 秒**内有效（可在设置页「验证码有效期」调整为 10–600 秒）。
+The badge clears automatically after filling; by default a code is only valid
+for **120 seconds** after arrival (adjustable to 10–600s under Settings → "OTP
+validity").
 
-### 3. 界面语言
+### 3. Interface language
 
-popup 和设置页右上角有**中 / English 切换**，首次跟随浏览器语言，之后记住你的选择。
+The popup and Settings page have a **中 / English toggle** at the top-right; it
+follows your browser language on first run, then remembers your choice.
 
 ## Self-host the agent (Docker)
 
