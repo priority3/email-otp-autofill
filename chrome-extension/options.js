@@ -28,13 +28,6 @@ let oauthPollExpiresAt = 0;
 let oauthPollInFlight = false;
 let oauthPollRunId = 0;
 
-// Gmail OAuth polling state (mirrors Outlook).
-let gmailPollTimer = null;
-let gmailPollDelayMs = 5000;
-let gmailPollExpiresAt = 0;
-let gmailPollInFlight = false;
-let gmailPollRunId = 0;
-
 // ---- password eye toggle (unchanged behavior) ----------------------------
 const EYE_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
@@ -792,104 +785,77 @@ function wireOauth() {
   });
 }
 
-function stopGmailAutoPoll() {
-  gmailPollRunId++;
-  if (gmailPollTimer) clearTimeout(gmailPollTimer);
-  gmailPollTimer = null;
-  gmailPollInFlight = false;
-  gmailPollExpiresAt = 0;
-  const start = $("gmailAuthStart");
-  if (start) start.disabled = false;
-}
-
-function scheduleGmailAutoPoll(runId, delayMs = gmailPollDelayMs) {
-  if (gmailPollTimer) clearTimeout(gmailPollTimer);
-  gmailPollTimer = setTimeout(() => void pollGmailAuthOnce(runId), Math.max(1000, delayMs));
-}
-
-async function pollGmailAuthOnce(runId) {
-  if (runId !== gmailPollRunId) return;
-  if (gmailPollInFlight) return;
-  if (gmailPollExpiresAt && Date.now() >= gmailPollExpiresAt) {
-    stopGmailAutoPoll();
-    setMsg("gmailOauthMsg", T("expired"));
-    await refreshStatus();
-    return;
-  }
-
-  gmailPollInFlight = true;
-  try {
-    const r = await bg({ type: "BG_GMAIL_AUTH_POLL" });
-    if (runId !== gmailPollRunId) return;
-    if (!r || !r.ok) {
-      stopGmailAutoPoll();
-      setMsg("gmailOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
-      return;
-    }
-
-    const result = r.result;
-    if (result.status === "success") {
-      stopGmailAutoPoll();
-      setMsg("gmailOauthMsg", T("connected"));
-      toggleGmailActions(true);
-      await refreshStatus();
-      await refreshGmailOAuthState();
-      setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
-      return;
-    }
-    if (result.status === "expired") {
-      stopGmailAutoPoll();
-      setMsg("gmailOauthMsg", T("expired"));
-      await refreshStatus();
-      return;
-    }
-
-    if (result.error === "slow_down") gmailPollDelayMs += 5000;
-    setMsg("gmailOauthMsg", T("oauth_waiting", { sec: Math.round(gmailPollDelayMs / 1000) }));
-    scheduleGmailAutoPoll(runId);
-  } catch (e) {
-    if (runId !== gmailPollRunId) return;
-    stopGmailAutoPoll();
-    setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
-  } finally {
-    if (runId === gmailPollRunId) gmailPollInFlight = false;
-  }
-}
-
 function wireGmailOauth() {
   $("gmailAuthStart").addEventListener("click", async () => {
-    stopGmailAutoPoll();
-    const runId = ++gmailPollRunId;
     setMsg("gmailDeviceCodeMsg", T("starting"));
     setMsg("gmailOauthMsg", "");
     $("gmailAuthStart").disabled = true;
+
     try {
-      const r = await bg({ type: "BG_GMAIL_AUTH_START" });
-      if (runId !== gmailPollRunId) return;
-      if (!r || !r.ok) {
-        stopGmailAutoPoll();
-        setMsg("gmailDeviceCodeMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+      // Get the client ID from the server status
+      const statusR = await bg({ type: "BG_AGENT_STATUS" });
+      const clientId = statusR?.ok && statusR?.status?.config?.gmail?.clientId;
+      if (!clientId) {
+        setMsg("gmailOauthMsg", T("gmail_no_client_id"));
+        $("gmailAuthStart").disabled = false;
         return;
       }
-      const dc = r.deviceCode;
-      const link = dc.verification_uri_complete || dc.verification_uri;
-      gmailPollDelayMs = Math.max(1, Number(dc.interval) || 5) * 1000;
-      gmailPollExpiresAt = Date.now() + Math.max(1, Number(dc.expires_in) || 900) * 1000;
-      setMsg("gmailDeviceCodeMsg", T("device_code_msg", { uri: dc.verification_uri, code: dc.user_code, sec: dc.expires_in }));
-      setMsg("gmailOauthMsg", T("oauth_waiting", { sec: Math.round(gmailPollDelayMs / 1000) }));
-      if (link) {
-        chrome.windows.create({ url: link, type: "popup", width: 500, height: 700 });
+
+      // Use chrome.identity.launchWebAuthFlow for standard OAuth
+      const redirectUri = chrome.identity.getRedirectURL();
+      const scopes = ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"];
+      const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+      authUrl.searchParams.set("client_id", clientId);
+      authUrl.searchParams.set("redirect_uri", redirectUri);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("scope", scopes.join(" "));
+      authUrl.searchParams.set("access_type", "offline");
+      authUrl.searchParams.set("prompt", "consent");
+
+      setMsg("gmailOauthMsg", T("oauth_waiting_browser"));
+
+      const responseUrl = await chrome.identity.launchWebAuthFlow({
+        url: authUrl.toString(),
+        interactive: true,
+      });
+
+      if (!responseUrl) {
+        setMsg("gmailOauthMsg", T("failed"));
+        $("gmailAuthStart").disabled = false;
+        return;
       }
-      scheduleGmailAutoPoll(runId, gmailPollDelayMs);
+
+      // Extract the authorization code from the redirect URL
+      const url = new URL(responseUrl);
+      const code = url.searchParams.get("code");
+      if (!code) {
+        const error = url.searchParams.get("error") || "no_code";
+        setMsg("gmailOauthMsg", T("failed_with", { err: error }));
+        $("gmailAuthStart").disabled = false;
+        return;
+      }
+
+      // Send the code to the server to exchange for tokens
+      setMsg("gmailOauthMsg", T("saving"));
+      const r = await bg({ type: "BG_GMAIL_AUTH_COMPLETE", code, redirectUri });
+
+      if (r && r.ok) {
+        setMsg("gmailOauthMsg", T("connected"));
+        toggleGmailActions(true);
+        await refreshStatus();
+        await refreshGmailOAuthState();
+        setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+      } else {
+        setMsg("gmailOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+      }
     } catch (e) {
-      if (runId !== gmailPollRunId) return;
-      stopGmailAutoPoll();
       setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
     }
+
+    $("gmailAuthStart").disabled = false;
   });
 
   $("gmailClear").addEventListener("click", async () => {
-    stopGmailAutoPoll();
     setMsg("gmailOauthMsg", T("clearing"));
     try {
       const r = await bg({ type: "BG_GMAIL_CLEAR" });
@@ -907,7 +873,6 @@ function wireGmailOauth() {
   });
 
   $("gmailDisconnect").addEventListener("click", async () => {
-    stopGmailAutoPoll();
     setMsg("gmailOauthMsg", T("clearing"));
     try {
       const r = await bg({ type: "BG_GMAIL_CLEAR" });

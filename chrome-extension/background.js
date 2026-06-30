@@ -334,6 +334,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: true, result: json.result });
       return;
     }
+
+    // Standard OAuth authorization code exchange (for browser-based sign-in).
+    if (msg.type === "BG_GMAIL_AUTH_COMPLETE") {
+      const json = await agentFetch("/v1/gmail/auth/complete", {
+        method: "POST",
+        body: JSON.stringify({ code: msg.code, redirectUri: msg.redirectUri })
+      });
+      sendResponse({ ok: true, result: json.result });
+      return;
+    }
   })()
     .catch((e) => sendResponse({ ok: false, error: String(e && e.message ? e.message : e) }));
 
