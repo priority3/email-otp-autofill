@@ -168,6 +168,35 @@ export class GmailOAuthProvider {
     this.deviceCode = null;
   }
 
+  // Exchange an authorization code (from standard OAuth redirect flow) for tokens.
+  async exchangeCodeForTokens(code: string, redirectUri: string): Promise<{ expiresIn: number }> {
+    if (!this.clientId) throw new Error("GOOGLE_CLIENT_ID_NOT_SET");
+    if (!this.clientSecret) throw new Error("GOOGLE_CLIENT_SECRET_NOT_SET");
+
+    const url = "https://oauth2.googleapis.com/token";
+    const body = formEncode({
+      grant_type: "authorization_code",
+      client_id: this.clientId,
+      client_secret: this.clientSecret,
+      code,
+      redirect_uri: redirectUri,
+    });
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(oauthError("token_exchange_failed", res.status, json));
+
+    const tok = json as TokenResponse;
+    if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
+    this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
+    const email = await this.resolveAccountEmail(tok.access_token);
+    if (email) await secretSet(this.accountEmailKey, email);
+    return { expiresIn: tok.expires_in };
+  }
+
   async startDeviceCode(): Promise<DeviceCodeResponse> {
     if (!this.clientId) throw new Error("GOOGLE_CLIENT_ID_NOT_SET");
     if (!this.clientSecret) throw new Error("GOOGLE_CLIENT_SECRET_NOT_SET");
@@ -302,9 +331,14 @@ export class GmailOAuthProvider {
       const listUrl =
         "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=10";
       const listRes = await fetch(listUrl, { headers: { authorization: `Bearer ${token}` } });
-      if (!listRes.ok) throw new Error(`gmail_list_failed:${listRes.status}`);
+      if (!listRes.ok) {
+        const errText = await listRes.text().catch(() => "");
+        console.error(`[gmail-poll] list failed: ${listRes.status} ${errText}`);
+        throw new Error(`gmail_list_failed:${listRes.status}`);
+      }
       const listJson = (await listRes.json()) as { messages?: Array<{ id?: string }> };
       const messages = Array.isArray(listJson.messages) ? listJson.messages : [];
+      console.log(`[gmail-poll] found ${messages.length} unread messages`);
       const now = Date.now();
 
       for (const msgRef of messages) {
@@ -328,6 +362,7 @@ export class GmailOAuthProvider {
         const best = extractBestOtp(`${subject}\n${bodyText}`);
         this.seenIds.add(id);
         if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
+        console.log(`[gmail-poll] message: ${subject} | OTP: ${best ? best.code : "none"}`);
         if (!best) continue;
 
         this.store.add({
@@ -345,6 +380,7 @@ export class GmailOAuthProvider {
       this.lastPollAt = Date.now();
     } catch (e) {
       this.lastError = String((e as any)?.message || e);
+      console.error(`[gmail-poll] error: ${this.lastError}`);
     }
   }
 }

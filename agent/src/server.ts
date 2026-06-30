@@ -392,6 +392,21 @@ export async function startServer() {
     }
   });
 
+  // Standard OAuth authorization code flow (for browser-based sign-in).
+  app.post("/v1/gmail/auth/complete", async (req, res) => {
+    const Body = z.object({ code: z.string().min(1), redirectUri: z.string().min(1) });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    try {
+      const mgr = await mgrFor(req);
+      const r = await mgr.getGmailOAuth().exchangeCodeForTokens(body.data.code, body.data.redirectUri);
+      await mgr.reconcile();
+      res.json({ ok: true, result: { status: "success", token: r } });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
+    }
+  });
+
   // ---- admin API (token-gated via requireAdmin) --------------------------
   app.get("/v1/admin/stats", requireAdmin, (_req, res) => {
     const now = Date.now();
