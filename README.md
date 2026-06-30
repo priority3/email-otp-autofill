@@ -199,3 +199,6 @@ Token-gated by `OTP_ADMIN_TOKEN` (send as a Bearer token). Highlights:
   disable users.
 
 A browser UI for the same lives at `/admin`.
+
+## Community
+This open-source project is linked and endorsed by the [LINUX DO](https://linux.do/).
