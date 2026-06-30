@@ -1,0 +1,108 @@
+name: Release package
+
+# Trigger on version tags (e.g. v1.0.0) or manual dispatch
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install agent dependencies
+        working-directory: agent
+        run: npm ci
+
+      - name: Build agent
+        working-directory: agent
+        run: npm run build
+
+      - name: Package chrome extension
+        run: |
+          cd chrome-extension
+          zip -r ../email-otp-autofill-chrome.zip . \
+            -x "*.git*" -x "*node_modules*" -x "*dist*"
+
+      - name: Package firefox extension
+        run: |
+          mkdir -p /tmp/firefox-ext
+          cp -r chrome-extension/* /tmp/firefox-ext/
+          # Patch manifest for Firefox compatibility
+          node -e "
+          const fs = require('fs');
+          const manifest = JSON.parse(fs.readFileSync('/tmp/firefox-ext/manifest.json', 'utf8'));
+
+          // Add Firefox-specific settings
+          manifest.browser_specific_settings = {
+            gecko: {
+              id: 'email-otp-autofill@razet.me',
+              strict_min_version: '109.0'
+            }
+          };
+
+          // Firefox MV3 prefers background.scripts over service_worker
+          if (manifest.background && manifest.background.service_worker) {
+            manifest.background = {
+              scripts: [manifest.background.service_worker]
+            };
+          }
+
+          fs.writeFileSync('/tmp/firefox-ext/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          console.log('Firefox manifest patched OK');
+          "
+          cd /tmp/firefox-ext
+          zip -r "$GITHUB_WORKSPACE/email-otp-autofill-firefox.zip" . \
+            -x "*.git*" -x "*node_modules*" -x "*dist*"
+
+      - name: Package agent
+        run: |
+          tar czf email-otp-autofill-agent.tar.gz \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            agent/package.json agent/package-lock.json \
+            agent/tsconfig.json agent/Dockerfile \
+            agent/dist agent/admin \
+            docker-compose.yml .env.example
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            email-otp-autofill-chrome.zip
+            email-otp-autofill-firefox.zip
+            email-otp-autofill-agent.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: packages
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            email-otp-autofill-chrome.zip
+            email-otp-autofill-firefox.zip
+            email-otp-autofill-agent.tar.gz
