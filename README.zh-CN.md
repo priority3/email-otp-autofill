@@ -159,3 +159,6 @@ agent 在服务器上绑定 `127.0.0.1:17373`。如何把它暴露到公网是**
 - `GET /v1/admin/users`、`POST /v1/admin/users/disable`——列出 / 启用 / 停用用户。
 
 对应的浏览器后台在 `/admin`。
+
+## 社区
+本开源项目已链接并认可 [LINUX DO 社区](https://linux.do/)。
