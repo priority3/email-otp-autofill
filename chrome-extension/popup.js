@@ -313,8 +313,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   $("copy").addEventListener("click", async () => {
     const code = $("code").textContent || "";
-    const cleaned = code.replace(/\D/g, "");
-    if (cleaned.length < 4) return;
+    const cleaned = code.trim().replace(/[\s-]+/g, "");
+    if (!/^[A-Za-z0-9]{4,10}$/.test(cleaned)) return;
     await navigator.clipboard.writeText(cleaned);
     setText("meta", t(LANG, "copied"));
     setTimeout(refresh, 700);
