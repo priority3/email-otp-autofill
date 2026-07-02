@@ -151,7 +151,7 @@ async function fillOnActiveTab(codeOverride) {
 
   const lang = await getUiLang();
 
-  let code = typeof codeOverride === "string" ? codeOverride.replace(/\D/g, "") : "";
+  let code = typeof codeOverride === "string" ? codeOverride.trim().replace(/[\s-]+/g, "") : "";
   if (!code) {
     const otp = await fetchLatestOtpForTab(tab.url || "");
     code = otp && otp.code ? otp.code : "";
