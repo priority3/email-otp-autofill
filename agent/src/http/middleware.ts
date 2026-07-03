@@ -33,9 +33,11 @@ export function noStore(_req: Request, res: Response, next: NextFunction) {
 }
 
 export function requireClientHeader(req: Request, res: Response, next: NextFunction) {
-  // Allow health checks and the browser-opened admin page without the header.
-  // (/v1/admin/* APIs still require the admin token via requireAdmin.)
+  // Allow health checks, the browser-opened admin page, and the Pub/Sub webhook
+  // without the header. (/v1/admin/* APIs still require the admin token via requireAdmin.)
   if (req.path === "/v1/status" || req.path === "/admin") return next();
+  if (req.path === "/v1/gmail/pubsub" && req.method === "POST") return next();
+  if (req.path === "/v1/gmail/auth/callback") return next(); // OAuth redirect from Google
 
   const v = req.headers[CLIENT_HEADER_NAME] ?? req.headers[CLIENT_HEADER_NAME.toLowerCase()];
   const value = Array.isArray(v) ? v[0] : v;

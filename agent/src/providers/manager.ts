@@ -60,7 +60,29 @@ export class ProviderManager {
     await this.reconcileQq();
     // OAuth pollers are cheap; they exit early if not connected.
     this.outlookOAuth.startPolling(this.config.pollIntervalMs);
-    this.gmailOAuth.startPolling(this.config.pollIntervalMs);
+
+    // Gmail: prefer Pub/Sub push, fall back to polling.
+    const gmailOAuth = this.gmailOAuth;
+    await gmailOAuth.loadPubSubState();
+
+    if (this.config.gmail.pubsubEnabled && this.config.gmail.topicName) {
+      // Pub/Sub mode: renew watch only if it was previously active.
+      // First-time watch registration must be done via /v1/gmail/pubsub/start.
+      const pubsubStatus = gmailOAuth.pubsubStatus();
+      if (pubsubStatus.expiration > 0) {
+        await gmailOAuth.renewWatchIfNeeded(this.config.gmail.topicName);
+      }
+      const updatedStatus = gmailOAuth.pubsubStatus();
+      if (updatedStatus.active) {
+        gmailOAuth.stop();
+      } else {
+        gmailOAuth.stop();
+        console.warn("[otp-agent] gmail pubsub watch inactive, not polling to preserve quota");
+      }
+    } else {
+      // Pub/Sub not configured — use polling.
+      gmailOAuth.startPolling(this.config.pollIntervalMs);
+    }
   }
 
   // Stop all watchers for this user (used when removing a user / shutting down).

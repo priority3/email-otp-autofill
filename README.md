@@ -2,11 +2,11 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Fetch email one-time passcodes (OTP) from QQ Mail / Outlook and autofill them
+Fetch email one-time passcodes (OTP) from QQ Mail / Outlook / Gmail and autofill them
 into the current page with a hotkey — via a local/self-hosted **agent** plus a
 Chrome (MV3) **extension**.
 
-> wip: Google, self-hosted, ...
+> wip: self-hosted, ...
 
 ## How it works
 
@@ -35,8 +35,8 @@ Two ways to connect:
 
 ## Features
 
-- **Mailboxes**: QQ Mail (IMAP auth code) and Outlook (OAuth device-code flow).
-  Multiple accounts run in parallel.
+- **Mailboxes**: QQ Mail (IMAP auth code), Outlook (OAuth device-code flow), and
+  Gmail (OAuth authorization-code flow). Multiple accounts run in parallel.
 - **OTP extraction**: keyword + scoring match for 4–8 digit codes (中/English
   keywords), with automatic validity-window detection (10s–24h).
 - **Hotkey autofill**: `⌘/Ctrl + Shift + .` finds the OTP input and fills it; a
@@ -52,9 +52,9 @@ Two ways to connect:
 
 ## Status
 
-Beyond MVP: QQ IMAP and Outlook OAuth (Graph device-code) are working;
-multi-tenant with SQLite-backed persistence and at-rest credential encryption;
-one-command Docker deploy.
+Beyond MVP: QQ IMAP, Outlook OAuth (Graph device-code), and Gmail OAuth are
+working; multi-tenant with SQLite-backed persistence and at-rest credential
+encryption; one-command Docker deploy.
 
 ## Load the extension
 
@@ -92,6 +92,12 @@ Click the extension icon → `Settings`. Confirm the `Agent` status at the top i
   "Allow public client flows" to Yes → copy the Application (client) ID and paste
   it in → `Save Client ID` → `Start login`, follow the device-code prompt to
   authorize in your browser → `Poll` to confirm the connection.
+- **Gmail (OAuth)**: in the
+  [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials)
+  create an OAuth 2.0 Client ID (type "Web application") → note the Client ID
+  and Client Secret → paste them in the extension's Gmail settings → `Start
+  Sign-in`, authorize in your browser → the connection is established
+  automatically.
 
 > A saved auth code/password is masked with dots (••••) the next time you open
 > Settings; click the **eye** icon at the right of the field to reveal it.
@@ -177,7 +183,7 @@ Then set the extension's **Agent Base URL** to your public address.
 
 ## Secrets storage
 
-Email credentials (QQ auth code / Outlook OAuth tokens) are stored encrypted in
+Email credentials (QQ auth code / Outlook OAuth tokens / Gmail OAuth tokens) are stored encrypted in
 the SQLite DB under the `data/` volume using **AES-256-GCM**,
 with the key derived (scrypt) from `OTP_AGENT_MASTER_KEY`. The master key is
 only read from the environment and is never written to disk — a leaked database

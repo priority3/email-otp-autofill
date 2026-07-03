@@ -1,6 +1,7 @@
 import { extractBestOtp } from "../otp/extract.js";
 import type { OtpStore } from "../otp/store.js";
 import { scopedKey } from "../http/auth.js";
+import { proxyFetch } from "../http/proxy-fetch.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getOutlookClientId } from "../storage/settings.js";
 
@@ -154,7 +155,7 @@ export class OutlookOAuthProvider {
       client_id: this.clientId,
       scope: DEVICE_CODE_SCOPE,
     });
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -185,7 +186,7 @@ export class OutlookOAuthProvider {
       client_id: this.clientId,
       device_code: this.deviceCode.value,
     });
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -234,7 +235,7 @@ export class OutlookOAuthProvider {
       refresh_token: refresh,
       scope: REFRESH_SCOPE,
     });
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -262,7 +263,7 @@ export class OutlookOAuthProvider {
     if (fromClaims) return fromClaims;
 
     try {
-      const res = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
+      const res = await proxyFetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
         headers: { authorization: `Bearer ${tok.access_token}` },
       });
       const json = (await res.json().catch(() => ({}))) as { mail?: string; userPrincipalName?: string };
@@ -281,7 +282,7 @@ export class OutlookOAuthProvider {
       const token = await this.ensureAccessToken();
       const url =
         "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$orderby=receivedDateTime%20desc&$select=id,subject,from,receivedDateTime,bodyPreview,body";
-      const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+      const res = await proxyFetch(url, { headers: { authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`graph_list_failed:${res.status}`);
       const json = (await res.json()) as { value?: any[] };
       const msgs = Array.isArray(json.value) ? json.value : [];

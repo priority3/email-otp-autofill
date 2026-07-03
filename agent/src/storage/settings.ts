@@ -62,3 +62,15 @@ export function getGoogleClientSecret(): string {
 export function setGoogleClientSecret(clientSecret: string): void {
   setSetting(GOOGLE_CLIENT_SECRET_KEY, clientSecret.trim());
 }
+
+const PUBSUB_AUDIENCE_KEY = "pubsub_audience";
+
+// Expected audience claim for Google Pub/Sub Push OIDC tokens.
+// Typically your agent's public URL, e.g. "https://your-agent.example.com/v1/gmail/pubsub"
+export function getPubSubAudience(): string {
+  return getSetting(PUBSUB_AUDIENCE_KEY, "").trim();
+}
+
+export function setPubSubAudience(audience: string): void {
+  setSetting(PUBSUB_AUDIENCE_KEY, audience.trim());
+}
