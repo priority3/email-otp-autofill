@@ -469,6 +469,13 @@ label {
   font-weight: 550;
 }
 
+label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 /* password field + eye toggle */
 .pwd-wrap {
   position: relative;
@@ -883,4 +890,3 @@ input.input-error:focus {
     max-height: none;
   }
 }
-

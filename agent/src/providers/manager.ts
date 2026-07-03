@@ -6,7 +6,7 @@ import { loadConfig, saveConfig } from "../storage/config.js";
 import { secretDelete, secretGet } from "../storage/secrets.js";
 import { LOCAL_USER_ID, scopedKey } from "../http/auth.js";
 
-type Watcher = { watcher: ImapOtpWatcher; task: Promise<void> };
+type Watcher = { watcher: ImapOtpWatcher; task: Promise<void>; includeSpam: boolean; pollIntervalMs: number };
 
 export class ProviderManager {
   private store: OtpStore;
@@ -52,7 +52,7 @@ export class ProviderManager {
   async reconcile(): Promise<void> {
     await this.reconcileQq();
     // OAuth poller is cheap; it exits early if not connected.
-    this.outlookOAuth.startPolling(this.config.pollIntervalMs);
+    this.outlookOAuth.startPolling(this.config.pollIntervalMs, this.config.includeSpam);
   }
 
   // Stop all watchers for this user (used when removing a user / shutting down).
@@ -75,7 +75,14 @@ export class ProviderManager {
     }
 
     for (const { email } of this.config.qq.accounts) {
-      if (this.qq.has(email)) continue;
+      const existing = this.qq.get(email);
+      if (existing) {
+        if (existing.includeSpam === this.config.includeSpam && existing.pollIntervalMs === this.config.pollIntervalMs) {
+          continue;
+        }
+        existing.watcher.stop();
+        this.qq.delete(email);
+      }
       const pass = await secretGet(this.kcQq(email));
       if (!pass) continue; // configured but no secret yet — skip until set
       const watcher = new ImapOtpWatcher({
@@ -87,13 +94,19 @@ export class ProviderManager {
         auth: { user: email, pass },
         store: this.store,
         pollIntervalMs: this.config.pollIntervalMs,
+        includeSpam: this.config.includeSpam,
       });
       // Reason: a bad credential makes start() reject; swallow it so one broken
       // account never crashes the agent (critical in multi-tenant).
       const task = watcher.start().catch((e) => {
         console.error(`[otp-agent] qq watcher failed for ${email}: ${String((e as any)?.message || e)}`);
       });
-      this.qq.set(email, { watcher, task });
+      this.qq.set(email, {
+        watcher,
+        task,
+        includeSpam: this.config.includeSpam,
+        pollIntervalMs: this.config.pollIntervalMs,
+      });
     }
   }
 

@@ -99,6 +99,8 @@ export class OutlookOAuthProvider {
   private lastError: string | null = null;
   private lastPollAt: number | null = null;
   private seenIds = new Set<string>();
+  private includeSpam = false;
+  private pollIntervalMs = 0;
 
   private deviceCode: { value: string; intervalSec: number; expiresAt: number } | null = null;
 
@@ -207,10 +209,16 @@ export class OutlookOAuthProvider {
     return { status: "success", token: { expiresIn: tok.expires_in } };
   }
 
-  startPolling(pollIntervalMs: number) {
-    if (this.running) return;
+  startPolling(pollIntervalMs: number, includeSpam = false) {
+    this.includeSpam = includeSpam;
+    this.pollIntervalMs = pollIntervalMs;
+    if (this.running) {
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), this.pollIntervalMs);
+      return;
+    }
     this.running = true;
-    this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), pollIntervalMs);
+    this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), this.pollIntervalMs);
     void this.pollOnce().catch(() => {});
   }
 
@@ -279,41 +287,47 @@ export class OutlookOAuthProvider {
     if (!has) return;
     try {
       const token = await this.ensureAccessToken();
-      const url =
-        "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?$top=10&$orderby=receivedDateTime%20desc&$select=id,subject,from,receivedDateTime,bodyPreview,body";
-      const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error(`graph_list_failed:${res.status}`);
-      const json = (await res.json()) as { value?: any[] };
-      const msgs = Array.isArray(json.value) ? json.value : [];
       const now = Date.now();
-      for (const msg of msgs) {
-        const id = String(msg.id || "");
-        if (!id || this.seenIds.has(id)) continue;
+      const folders = this.includeSpam ? ["inbox", "junkemail"] : ["inbox"];
+      for (const folder of folders) {
+        const url =
+          `https://graph.microsoft.com/v1.0/me/mailFolders/${folder}/messages` +
+          "?$top=10&$orderby=receivedDateTime%20desc&$select=id,subject,from,receivedDateTime,bodyPreview,body";
+        const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+        if (!res.ok) throw new Error(`graph_list_${folder}_failed:${res.status}`);
+        const json = (await res.json()) as { value?: any[] };
+        const msgs = Array.isArray(json.value) ? json.value : [];
+        for (const msg of msgs) {
+          const id = String(msg.id || "");
+          const seenKey = `${folder}:${id}`;
+          if (!id || this.seenIds.has(seenKey)) continue;
 
-        const receivedAt = msg.receivedDateTime ? Date.parse(String(msg.receivedDateTime)) : now;
-        if (!Number.isFinite(receivedAt)) continue;
-        if (now - receivedAt > 10 * 60 * 1000) continue; // only recent
+          const receivedAt = msg.receivedDateTime ? Date.parse(String(msg.receivedDateTime)) : now;
+          if (!Number.isFinite(receivedAt)) continue;
+          if (now - receivedAt > 10 * 60 * 1000) continue; // only recent
 
-        const subject = String(msg.subject || "");
-        const from =
-          msg.from?.emailAddress?.address || msg.from?.emailAddress?.name || (msg.from ? String(msg.from) : "");
-        const preview = String(msg.bodyPreview || "");
-        const bodyText = graphBodyText(msg.body);
-        const best = extractBestOtp(`${subject}\n${preview}\n${bodyText}`);
-        this.seenIds.add(id);
-        if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
-        if (!best) continue;
+          const subject = String(msg.subject || "");
+          const from =
+            msg.from?.emailAddress?.address || msg.from?.emailAddress?.name || (msg.from ? String(msg.from) : "");
+          const preview = String(msg.bodyPreview || "");
+          const bodyText = graphBodyText(msg.body);
+          const best = extractBestOtp(`${subject}\n${preview}\n${bodyText}`);
+          this.seenIds.add(seenKey);
+          if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
+          if (!best) continue;
 
-        this.store.add({
-          provider: "outlook",
-          userId: this.userId,
-          code: best.code,
-          receivedAt,
-          ttlSec: best.ttlSec,
-          from: from || undefined,
-          subject: subject || undefined,
-          messageId: id,
-        });
+          this.store.add({
+            provider: "outlook",
+            userId: this.userId,
+            code: best.code,
+            receivedAt,
+            ttlSec: best.ttlSec,
+            from: from || undefined,
+            subject: subject || undefined,
+            messageId: seenKey,
+            folder,
+          });
+        }
       }
       this.lastError = null;
       this.lastPollAt = Date.now();
