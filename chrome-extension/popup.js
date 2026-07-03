@@ -17,7 +17,8 @@ const SELECTED_OTP_KEY = "selectedOtpId";
 // Human-facing provider label + icon for the source tag.
 const PROVIDER_META = {
   qq: { name: "QQ 邮箱", icon: "📩" },
-  outlook: { name: "Outlook", icon: "📨" }
+  outlook: { name: "Outlook", icon: "📨" },
+  gmail: { name: "Gmail", icon: "📧" }
 };
 
 function providerMeta(provider) {

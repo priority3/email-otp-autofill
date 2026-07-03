@@ -14,7 +14,7 @@ const CLIENT_HEADER_VALUE = "email-otp-autofill";
 const DEFAULTS = {
   agentBaseUrl: "https://otp.razet.me",
   maxAgeSec: 120,
-  providers: ["qq", "outlook"]
+  providers: ["qq", "outlook", "gmail"]
 };
 
 async function getSettings() {

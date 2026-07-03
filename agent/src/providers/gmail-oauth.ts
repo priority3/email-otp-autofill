@@ -1,6 +1,7 @@
 import { extractBestOtp } from "../otp/extract.js";
 import type { OtpStore } from "../otp/store.js";
 import { scopedKey } from "../http/auth.js";
+import { proxyFetch } from "../http/proxy-fetch.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getGoogleClientId, getGoogleClientSecret } from "../storage/settings.js";
 
@@ -105,6 +106,14 @@ function getHeader(headers: GmailMessageHeader[] | undefined, name: string): str
   return h?.value || "";
 }
 
+// Persisted secret keys for Pub/Sub state.
+function pubsubHistoryKey(userId: string) {
+  return scopedKey(userId, "gmail_oauth:historyId");
+}
+function pubsubWatchExpirationKey(userId: string) {
+  return scopedKey(userId, "gmail_oauth:watchExpiration");
+}
+
 export class GmailOAuthProvider {
   private store: OtpStore;
   private userId: string;
@@ -120,6 +129,10 @@ export class GmailOAuthProvider {
   private seenIds = new Set<string>();
 
   private deviceCode: { value: string; intervalSec: number; expiresAt: number } | null = null;
+
+  // Pub/Sub state (loaded from secret store on demand).
+  private _lastHistoryId: string | null = null;
+  private _watchExpiration: number = 0;
 
   constructor(store: OtpStore, userId: string = "local") {
     this.store = store;
@@ -145,6 +158,8 @@ export class GmailOAuthProvider {
       running: this.running,
       lastError: this.lastError,
       lastPollAt: this.lastPollAt,
+      watchExpiration: this._watchExpiration,
+      lastHistoryId: this._lastHistoryId,
     };
   }
 
@@ -158,14 +173,192 @@ export class GmailOAuthProvider {
   }
 
   private get getRefreshTokenSyncHint(): boolean {
-    return true;
+    return Boolean(this.accessToken) || this.running;
   }
 
   async clearAuth(): Promise<void> {
     await secretDelete(this.refreshKey);
     await secretDelete(this.accountEmailKey);
+    await secretDelete(pubsubHistoryKey(this.userId));
+    await secretDelete(pubsubWatchExpirationKey(this.userId));
     this.accessToken = null;
     this.deviceCode = null;
+    this._lastHistoryId = null;
+    this._watchExpiration = 0;
+  }
+
+  // ── Pub/Sub watch management ──────────────────────────────────────────
+
+  /** Load persisted Pub/Sub state from the secret store. */
+  async loadPubSubState(): Promise<void> {
+    this._lastHistoryId = (await secretGet(pubsubHistoryKey(this.userId))) || null;
+    const exp = await secretGet(pubsubWatchExpirationKey(this.userId));
+    this._watchExpiration = exp ? Number(exp) || 0 : 0;
+  }
+
+  /** Persist Pub/Sub state to the secret store. */
+  private async savePubSubState(): Promise<void> {
+    if (this._lastHistoryId) {
+      await secretSet(pubsubHistoryKey(this.userId), this._lastHistoryId);
+    }
+    if (this._watchExpiration > 0) {
+      await secretSet(pubsubWatchExpirationKey(this.userId), String(this._watchExpiration));
+    }
+  }
+
+  /**
+   * Register Gmail push notifications via `users.watch()`.
+   * Gmail will send notifications to the Pub/Sub topic when new mail arrives.
+   * Watch expires after ~7 days and must be renewed.
+   */
+  async startWatch(topicName: string): Promise<{ historyId: string; expiration: number }> {
+    const token = await this.ensureAccessToken();
+    const res = await proxyFetch(
+      "https://gmail.googleapis.com/gmail/v1/users/me/watch",
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ topicName, labelIds: ["INBOX"] }),
+      },
+    );
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(oauthError("watch_failed", res.status, json));
+    }
+    const { historyId, expiration } = json as { historyId: string; expiration: string };
+    this._lastHistoryId = historyId;
+    this._watchExpiration = Number(expiration) || Date.now() + 7 * 86_400_000;
+    await this.savePubSubState();
+    console.log(
+      `[gmail-pubsub] watch started, historyId=${historyId}, expires=${new Date(this._watchExpiration).toISOString()}`,
+    );
+    return { historyId, expiration: this._watchExpiration };
+  }
+
+  /**
+   * Renew the Gmail watch if it has expired or is about to expire (< 1 day).
+   * Returns true if a renewal was performed.
+   */
+  async renewWatchIfNeeded(topicName: string): Promise<boolean> {
+    const ONE_DAY_MS = 86_400_000;
+    if (this._watchExpiration > 0 && Date.now() < this._watchExpiration - ONE_DAY_MS) {
+      return false; // not yet due
+    }
+    try {
+      await this.startWatch(topicName);
+      return true;
+    } catch (e) {
+      console.error(`[gmail-pubsub] watch renewal failed: ${(e as any)?.message || e}`);
+      return false;
+    }
+  }
+
+  /**
+   * Handle an incoming Pub/Sub push notification.
+   * Google sends { emailAddress, historyId } when new mail arrives.
+   * We use history.list to get the delta since our last known historyId,
+   * then extract OTP from each new message.
+   */
+  async handlePubSubNotification(historyId: string): Promise<void> {
+    try {
+      await this.loadPubSubState();
+      const startHistoryId = this._lastHistoryId;
+      this._lastHistoryId = historyId;
+      await this.savePubSubState();
+
+      if (!startHistoryId) {
+        // First notification — no baseline to diff against. Just record the historyId.
+        console.log(`[gmail-pubsub] first notification, recording historyId=${historyId}`);
+        return;
+      }
+
+      const token = await this.ensureAccessToken();
+      const listUrl =
+        `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${startHistoryId}&historyTypes=messageAdded&labelId=INBOX`;
+      const listRes = await proxyFetch(listUrl, { headers: { authorization: `Bearer ${token}` } });
+      if (!listRes.ok) {
+        if (listRes.status === 401) this.accessToken = null;
+        throw new Error(`history_list_failed:${listRes.status}`);
+      }
+
+      const listJson = (await listRes.json()) as {
+        history?: Array<{ messagesAdded?: Array<{ message?: { id?: string } }> }>;
+      };
+      const histories = Array.isArray(listJson.history) ? listJson.history : [];
+      const now = Date.now();
+
+      for (const h of histories) {
+        const added = Array.isArray(h.messagesAdded) ? h.messagesAdded : [];
+        for (const entry of added) {
+          const id = String(entry.message?.id || "");
+          if (!id || this.seenIds.has(id)) continue;
+          await this.processMessage(id, token, now);
+        }
+      }
+
+      this.lastError = null;
+    } catch (e) {
+      this.lastError = String((e as any)?.message || e);
+      console.error(`[gmail-pubsub] error: ${this.lastError}`);
+    }
+  }
+
+  /**
+   * Fetch and extract OTP from a single Gmail message.
+   */
+  private async processMessage(id: string, token: string, now: number): Promise<void> {
+    // Metadata first (cheaper), fall back to full for body.
+    const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From`;
+    const msgRes = await proxyFetch(msgUrl, { headers: { authorization: `Bearer ${token}` } });
+    if (!msgRes.ok) return;
+    const msg = (await msgRes.json()) as GmailMessage;
+
+    const internalDate = Number(msg.internalDate || 0);
+    const receivedAt = Number.isFinite(internalDate) && internalDate > 0 ? internalDate : now;
+
+    const headers = msg.payload?.headers;
+    const subject = getHeader(headers, "Subject");
+    const from = getHeader(headers, "From");
+
+    let best = extractBestOtp(subject || "");
+
+    if (!best) {
+      const fullUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
+      const fullRes = await proxyFetch(fullUrl, { headers: { authorization: `Bearer ${token}` } });
+      if (fullRes.ok) {
+        const fullMsg = (await fullRes.json()) as GmailMessage;
+        const bodyText = extractPlainText(fullMsg.payload);
+        best = extractBestOtp(`${subject}\n${bodyText}`);
+      }
+    }
+
+    this.seenIds.add(id);
+    if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
+    console.log(`[gmail-pubsub] message: ${subject} | OTP: ${best ? best.code : "none"}`);
+    if (!best) return;
+
+    this.store.add({
+      provider: "gmail",
+      userId: this.userId,
+      code: best.code,
+      receivedAt,
+      ttlSec: best.ttlSec,
+      from: from || undefined,
+      subject: subject || undefined,
+      messageId: id,
+    });
+  }
+
+  /** Return current Pub/Sub watch state for status reporting. */
+  pubsubStatus(): { active: boolean; expiration: number; lastHistoryId: string | null } {
+    return {
+      active: this._watchExpiration > Date.now(),
+      expiration: this._watchExpiration,
+      lastHistoryId: this._lastHistoryId,
+    };
   }
 
   // Exchange an authorization code (from standard OAuth redirect flow) for tokens.
@@ -181,7 +374,7 @@ export class GmailOAuthProvider {
       code,
       redirect_uri: redirectUri,
     });
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -206,7 +399,7 @@ export class GmailOAuthProvider {
       scope: DEVICE_CODE_SCOPE,
     });
     const authHeader = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString("base64");
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
@@ -242,7 +435,7 @@ export class GmailOAuthProvider {
       client_secret: this.clientSecret,
       device_code: this.deviceCode.value,
     });
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -292,7 +485,7 @@ export class GmailOAuthProvider {
       grant_type: "refresh_token",
       refresh_token: refresh,
     });
-    const res = await fetch(url, {
+    const res = await proxyFetch(url, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body,
@@ -309,7 +502,7 @@ export class GmailOAuthProvider {
 
   private async resolveAccountEmail(accessToken: string): Promise<string | null> {
     try {
-      const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      const res = await proxyFetch("https://www.googleapis.com/oauth2/v3/userinfo", {
         headers: { authorization: `Bearer ${accessToken}` },
       });
       const json = (await res.json().catch(() => ({}))) as { email?: string };
@@ -320,22 +513,57 @@ export class GmailOAuthProvider {
     }
   }
 
+  private backoffUntil = 0;
+  private consecutiveErrors = 0;
+
   private async pollOnce(): Promise<void> {
     if (!this.clientId) return;
     const has = await this.hasRefreshToken();
     if (!has) return;
+
+    // Respect backoff period (from 429 errors)
+    if (Date.now() < this.backoffUntil) return;
+
     try {
       const token = await this.ensureAccessToken();
 
       // List recent messages (last 10 minutes)
+      // Use metadata format first to reduce quota usage (5 units vs 5+ units per message)
       const listUrl =
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=10";
-      const listRes = await fetch(listUrl, { headers: { authorization: `Bearer ${token}` } });
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=5";
+      const listRes = await proxyFetch(listUrl, { headers: { authorization: `Bearer ${token}` } });
       if (!listRes.ok) {
         const errText = await listRes.text().catch(() => "");
         console.error(`[gmail-poll] list failed: ${listRes.status} ${errText}`);
+
+        // Handle 429 rate limit with exponential backoff
+        if (listRes.status === 429) {
+          this.consecutiveErrors++;
+          // Parse retry-after from response (Gmail returns ISO timestamp)
+          const retryMatch = errText.match(/Retry after ([^"]+)/);
+          let backoffMs = Math.min(300000, Math.pow(2, this.consecutiveErrors) * 1000); // max 5 min
+          if (retryMatch) {
+            const retryTime = new Date(retryMatch[1]).getTime();
+            if (Number.isFinite(retryTime)) {
+              backoffMs = Math.max(backoffMs, retryTime - Date.now() + 1000);
+            }
+          }
+          this.backoffUntil = Date.now() + backoffMs;
+          console.warn(`[gmail-poll] rate limited, backing off ${Math.round(backoffMs / 1000)}s`);
+          return;
+        }
+
+        // Token revoked or expired — clear cached token so next cycle re-refreshes.
+        if (listRes.status === 401) {
+          this.accessToken = null;
+          console.warn("[gmail-poll] 401 received, cleared cached access token");
+        }
         throw new Error(`gmail_list_failed:${listRes.status}`);
       }
+
+      // Success — reset backoff
+      this.consecutiveErrors = 0;
+
       const listJson = (await listRes.json()) as { messages?: Array<{ id?: string }> };
       const messages = Array.isArray(listJson.messages) ? listJson.messages : [];
       console.log(`[gmail-poll] found ${messages.length} unread messages`);
@@ -345,9 +573,9 @@ export class GmailOAuthProvider {
         const id = String(msgRef.id || "");
         if (!id || this.seenIds.has(id)) continue;
 
-        // Fetch full message
-        const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
-        const msgRes = await fetch(msgUrl, { headers: { authorization: `Bearer ${token}` } });
+        // Fetch message with metadata format first (cheaper), fall back to full if needed
+        const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From`;
+        const msgRes = await proxyFetch(msgUrl, { headers: { authorization: `Bearer ${token}` } });
         if (!msgRes.ok) continue;
         const msg = (await msgRes.json()) as GmailMessage;
 
@@ -358,8 +586,21 @@ export class GmailOAuthProvider {
         const headers = msg.payload?.headers;
         const subject = getHeader(headers, "Subject");
         const from = getHeader(headers, "From");
-        const bodyText = extractPlainText(msg.payload);
-        const best = extractBestOtp(`${subject}\n${bodyText}`);
+
+        // Try to extract OTP from subject first (most OTP emails have code in subject)
+        let best = extractBestOtp(subject || "");
+
+        // If no OTP in subject, fetch full message for body parsing
+        if (!best) {
+          const fullUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`;
+          const fullRes = await proxyFetch(fullUrl, { headers: { authorization: `Bearer ${token}` } });
+          if (fullRes.ok) {
+            const fullMsg = (await fullRes.json()) as GmailMessage;
+            const bodyText = extractPlainText(fullMsg.payload);
+            best = extractBestOtp(`${subject}\n${bodyText}`);
+          }
+        }
+
         this.seenIds.add(id);
         if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
         console.log(`[gmail-poll] message: ${subject} | OTP: ${best ? best.code : "none"}`);
@@ -380,6 +621,7 @@ export class GmailOAuthProvider {
       this.lastPollAt = Date.now();
     } catch (e) {
       this.lastError = String((e as any)?.message || e);
+      this.consecutiveErrors++;
       console.error(`[gmail-poll] error: ${this.lastError}`);
     }
   }

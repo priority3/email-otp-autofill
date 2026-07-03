@@ -26,8 +26,10 @@ const ConfigSchema = z.object({
   gmail: z
     .object({
       mode: z.literal("oauth").default("oauth"),
+      pubsubEnabled: z.boolean().default(false),
+      topicName: z.string().optional(),
     })
-    .default(() => ({ mode: "oauth" as const })),
+    .default(() => ({ mode: "oauth" as const, pubsubEnabled: false })),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
