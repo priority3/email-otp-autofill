@@ -9,6 +9,7 @@ const AccountSchema = z.object({
 
 const ConfigSchema = z.object({
   pollIntervalMs: z.number().int().min(1000).max(60000).default(5000),
+  includeSpam: z.boolean().default(false),
   qq: z
     .object({
       // Multi-account: each QQ mailbox is one entry. The auth code lives in the
