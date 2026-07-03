@@ -300,6 +300,7 @@ async function loadExtSettings() {
   // Connection field lives in the login panel (editable only before login).
   $("loginBaseUrl").value = raw.agentBaseUrl || DEFAULT_BASE_URL;
   $("maxAgeSec").value = String(Number.isFinite(raw.maxAgeSec) ? raw.maxAgeSec : 120);
+  $("includeSpam").checked = false;
 }
 
 // panelAgent save: only the post-login setting (max OTP age). The server
@@ -307,9 +308,12 @@ async function loadExtSettings() {
 async function saveExtSettings() {
   setMsg("saveExtMsg", T("saving"));
   const maxAgeSec = Math.max(10, Math.min(600, Number($("maxAgeSec").value || "120")));
+  const includeSpam = !!$("includeSpam").checked;
   try {
     await chrome.storage.local.set({ maxAgeSec });
+    await bg({ type: "BG_AGENT_CONFIG", payload: { includeSpam } });
     setMsg("saveExtMsg", T("saved"));
+    await refreshStatus();
   } catch (e) {
     setMsg("saveExtMsg", T("save_failed_with", { err: String(e && e.message ? e.message : e) }));
     return;
@@ -514,6 +518,7 @@ async function refreshStatus() {
     // host), not the agent's internal bind address (e.g. 0.0.0.0:17373).
     setAgentStatus(true, await connectedHostLabel());
     const cfg = r.status.config || {};
+    $("includeSpam").checked = !!cfg.includeSpam;
 
     // Build the flat account list from qq accounts + outlook oauth.
     const next = [];

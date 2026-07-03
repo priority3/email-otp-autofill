@@ -191,6 +191,7 @@ export async function startServer() {
       authenticated: true,
       config: {
         pollIntervalMs: cfg.pollIntervalMs,
+        includeSpam: cfg.includeSpam,
         qq: { accounts: qqAccounts },
         outlook: {
           mode: cfg.outlook.mode,
@@ -202,6 +203,19 @@ export async function startServer() {
         },
       },
     });
+  });
+
+  app.post("/v1/config", async (req, res) => {
+    const Body = z.object({
+      includeSpam: z.boolean().optional(),
+    });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    await mgr.updateConfig((c) => {
+      if (typeof body.data.includeSpam === "boolean") c.includeSpam = body.data.includeSpam;
+    });
+    res.json({ ok: true });
   });
 
   // ---- OTP ---------------------------------------------------------------

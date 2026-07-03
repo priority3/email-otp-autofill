@@ -44,6 +44,7 @@
       show_password: "Show password",
       hide_password: "Hide password",
       max_age: "Max OTP Age (seconds)",
+      include_spam: "Include Spam/Junk folders",
       save_ext: "Save Extension Settings",
       language: "Language",
 
@@ -187,6 +188,7 @@
       show_password: "显示密码",
       hide_password: "隐藏密码",
       max_age: "验证码有效期（秒）",
+      include_spam: "扫描垃圾邮件文件夹",
       save_ext: "保存扩展设置",
       language: "语言",
 

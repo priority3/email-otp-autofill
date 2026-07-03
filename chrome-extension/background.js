@@ -210,6 +210,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
     }
 
+    if (msg.type === "BG_AGENT_CONFIG") {
+      const json = await agentFetch("/v1/config", {
+        method: "POST",
+        body: JSON.stringify(msg.payload || {})
+      });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
     // --- multi-tenant auth ---
     if (msg.type === "BG_AUTH_REGISTER" || msg.type === "BG_AUTH_LOGIN") {
       const path = msg.type === "BG_AUTH_REGISTER" ? "/v1/auth/register" : "/v1/auth/login";

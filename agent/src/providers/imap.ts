@@ -18,6 +18,7 @@ export type ImapProviderOptions = {
   auth: ImapAuth;
   store: OtpStore;
   pollIntervalMs?: number;
+  includeSpam?: boolean;
 };
 
 export type VerifyImapInput = {
@@ -102,6 +103,46 @@ function stripHtml(html: string): string {
     .replace(/[ \t]+/g, " ");
 }
 
+const JUNK_NAME_HINTS = [
+  "junk",
+  "spam",
+  "bulk",
+  "垃圾",
+  "垃圾邮件",
+  "垃圾郵件",
+  "垃圾箱",
+  "junk e-mail",
+  "junk email",
+];
+const JUNK_FALLBACK_FOLDERS = ["Junk", "Spam", "Bulk Mail", "Junk E-mail", "垃圾邮件"];
+
+function flattenMailboxes(entries: any[]): any[] {
+  const out: any[] = [];
+  for (const entry of entries) {
+    out.push(entry);
+    if (Array.isArray(entry?.children)) out.push(...flattenMailboxes(entry.children));
+  }
+  return out;
+}
+
+function folderPath(entry: any): string {
+  return String(entry?.path || entry?.name || "").trim();
+}
+
+function isLikelyJunkFolder(entry: any): boolean {
+  const flags = Array.isArray(entry?.specialUse)
+    ? entry.specialUse
+    : entry?.specialUse
+      ? [entry.specialUse]
+      : Array.isArray(entry?.flags)
+        ? entry.flags
+        : [];
+  if (flags.some((f: unknown) => String(f).toLowerCase() === "\\junk")) return true;
+
+  const name = `${entry?.name || ""} ${entry?.path || ""}`.toLowerCase();
+  return JUNK_NAME_HINTS.some((hint) => name.includes(hint.toLowerCase()));
+}
+
 export class ImapOtpWatcher {
   private client: ImapFlow;
   private opts: ImapProviderOptions;
@@ -110,6 +151,7 @@ export class ImapOtpWatcher {
   private lastError: string | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private refreshBusy = false;
+  private junkFolders: string[] | null = null;
 
   constructor(opts: ImapProviderOptions) {
     this.opts = opts;
@@ -236,8 +278,50 @@ export class ImapOtpWatcher {
     }
   }
 
+  private async resolveJunkFolders(): Promise<string[]> {
+    if (!this.opts.includeSpam) return [];
+    if (this.junkFolders) return this.junkFolders;
+
+    const folders = new Set<string>();
+    try {
+      const listed = await (this.client as any).list();
+      const entries = flattenMailboxes(Array.isArray(listed) ? listed : []);
+      for (const entry of entries) {
+        if (!isLikelyJunkFolder(entry)) continue;
+        const path = folderPath(entry);
+        if (path && path.toUpperCase() !== "INBOX") folders.add(path);
+      }
+    } catch {
+      // Fall back to common names below; failed folder locks are ignored.
+    }
+
+    if (!folders.size) {
+      for (const path of JUNK_FALLBACK_FOLDERS) folders.add(path);
+    }
+    this.junkFolders = [...folders];
+    return this.junkFolders;
+  }
+
   private async fetchLatest(): Promise<void> {
-    const lock = await this.client.getMailboxLock("INBOX");
+    // Keep INBOX last so the connection is selected back to INBOX before IDLE.
+    // Spam/Junk still gets covered by the heartbeat poll.
+    const folders = [...(await this.resolveJunkFolders()), "INBOX"];
+    for (const folder of folders) {
+      await this.fetchLatestFromFolder(folder);
+    }
+  }
+
+  private async fetchLatestFromFolder(folder: string): Promise<void> {
+    let lock: { release: () => void } | null = null;
+    try {
+      lock = await this.client.getMailboxLock(folder);
+    } catch (e) {
+      if (folder !== "INBOX" && this.junkFolders) {
+        this.junkFolders = this.junkFolders.filter((f) => f !== folder);
+      }
+      if (folder !== "INBOX") return;
+      throw e;
+    }
     try {
       const mailbox = this.client.mailbox;
       if (!mailbox) return;
@@ -279,10 +363,11 @@ export class ImapOtpWatcher {
         ttlSec: best.ttlSec,
         from,
         subject,
-        messageId,
+        messageId: messageId ? `${folder}:${messageId}` : undefined,
+        folder,
       });
     } finally {
-      lock.release();
+      lock?.release();
     }
   }
 }
