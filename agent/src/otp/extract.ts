@@ -5,17 +5,36 @@ export type OtpCandidate = {
   ttlSec?: number; // validity window parsed from the email body, if stated
 };
 
-const KEYWORDS = [
-  /验证码/i,
-  /驗證碼/i,
-  /校验码/i,
-  /动态码/i,
-  /\bOTP\b/i,
-  /one[\s-]?time/i,
-  /verification code/i,
-  /\bsecurity code\b/i,
-  /\blogin code\b/i,
+// Keyword fragments (regex source), shared by the keyword-boost test and the
+// "code right after a keyword" matchers so the two can never drift apart.
+// Includes the Chinese phrasings Microsoft / Outlook use ("安全代码", "单次代码"),
+// which earlier versions missed — leaving those codes with no keyword boost.
+const KEYWORD_SOURCES = [
+  "验证码",
+  "驗證碼",
+  "校验码",
+  "校驗碼",
+  "动态码",
+  "動態碼",
+  "安全代码",
+  "安全代碼",
+  "安全碼",
+  "验证代码",
+  "驗證代碼",
+  "单次代码",
+  "單次代碼",
+  "\\bOTP\\b",
+  "one[\\s-]?time",
+  "verification code",
+  "\\bsecurity code\\b",
+  "\\blogin code\\b",
+  "single[\\s-]?use code",
 ];
+const KEYWORDS = KEYWORD_SOURCES.map((s) => new RegExp(s, "i"));
+const KEYWORD_ALT = KEYWORD_SOURCES.join("|");
+const CONNECTOR_WORDS = String.raw`(?:is|as|was|are|your|the|this|for)`;
+const KEYWORD_CODE_GAP = String.raw`(?:[^A-Za-z0-9]{0,24}(?:\b${CONNECTOR_WORDS}\b[^A-Za-z0-9]{0,24}){0,4})`;
+const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|[\s-](?=[A-Za-z0-9])){2,18}[A-Za-z0-9])`;
 
 function normalize(s: string): string {
   return s
@@ -34,18 +53,75 @@ function keywordBoost(context: string): number {
   return boost;
 }
 
+// A bare 4-digit number in 1900–2099 is almost always a calendar year (a date
+// or a "© 2026" footer), not an OTP. Reason: we only drop it when NO keyword
+// sits nearby — a genuine code that happens to look like a year still gets
+// matched by the near-keyword pass and keeps its high score.
+function looksLikeYear(code: string): boolean {
+  if (code.length !== 4) return false;
+  const n = Number(code);
+  return n >= 1900 && n <= 2099;
+}
+
+function normalizeCandidate(code: string): string {
+  return code.replace(/[\s-]+/g, "");
+}
+
+function isCodeShape(code: string, allowAlnum: boolean): boolean {
+  if (!/^[A-Za-z0-9]+$/.test(code)) return false;
+  if (/^\d+$/.test(code)) return code.length >= 4 && code.length <= 8;
+  if (!allowAlnum) return false;
+  return code.length >= 4 && code.length <= 10 && /[A-Za-z]/.test(code) && /\d/.test(code);
+}
+
 export function extractOtpCandidates(raw: string): OtpCandidate[] {
   const text = normalize(raw);
   const candidates: OtpCandidate[] = [];
 
-  const nearKeyword = new RegExp(
-    String.raw`(?:验证码|驗證碼|校验码|动态码|OTP|one[\s-]?time|verification code|security code|login code)[^0-9]{0,24}(\d{4,8})`,
-    "gi",
-  );
+  // Build a candidate, applying the year rule consistently. A year-shaped
+  // number (e.g. "© 2026", "2026年") is never a confident OTP: drop it outright
+  // when no keyword is near, and keep it only as a weak last resort when one is
+  // — so "验证码：2026" still returns 2026 if it's the lone candidate, but a real
+  // code always outranks a stray copyright/date year.
+  const push = (rawCode: string, baseScore: number, reason: string, boost: number, allowAlnum = false) => {
+    const code = normalizeCandidate(rawCode);
+    if (!isCodeShape(code, allowAlnum)) return;
+    if (looksLikeYear(code)) {
+      if (boost === 0) return;
+      candidates.push({ code, score: 2, reason });
+      return;
+    }
+    candidates.push({ code, score: baseScore + boost, reason });
+  };
+
   let m: RegExpExecArray | null;
-  while ((m = nearKeyword.exec(text))) {
-    const code = m[1]!;
-    candidates.push({ code, score: 10 + keywordBoost(m[0]!), reason: "near_keyword" });
+
+  // Alphanumeric codes right after a keyword: "验证码为: d6ad3e",
+  // "your verification code is A1B2C3". Restrict mixed codes to keyword
+  // contexts; global alphanumeric scanning would pick up URL tokens too often.
+  const alnumAfterKeyword = new RegExp(String.raw`(?:${KEYWORD_ALT})${KEYWORD_CODE_GAP}${ALNUM_CODE_PATTERN}`, "gi");
+  while ((m = alnumAfterKeyword.exec(text))) {
+    push(m[1]!, 13, "near_keyword_alnum", keywordBoost(m[0]!), true);
+  }
+
+  // Alphanumeric codes right before a keyword: "A1B2C3 is your verification code".
+  const alnumBeforeKeyword = new RegExp(String.raw`\b([A-Za-z0-9][A-Za-z0-9-]{2,18}[A-Za-z0-9])\b${KEYWORD_CODE_GAP}(?:${KEYWORD_ALT})`, "gi");
+  while ((m = alnumBeforeKeyword.exec(text))) {
+    push(m[1]!, 12, "near_keyword_alnum", keywordBoost(m[0]!), true);
+  }
+
+  // Digits right after a keyword: "验证码：123456".
+  const afterKeyword = new RegExp(String.raw`(?:${KEYWORD_ALT})[^0-9]{0,24}(\d{4,8})`, "gi");
+  while ((m = afterKeyword.exec(text))) {
+    push(m[1]!, 10, "near_keyword", keywordBoost(m[0]!));
+  }
+
+  // Digits right before a keyword: "752740 is your verification code". Without
+  // this, a copyright year that follows the keyword would outrank the real code
+  // that precedes it.
+  const beforeKeyword = new RegExp(String.raw`(\d{4,8})[^0-9]{0,24}(?:${KEYWORD_ALT})`, "gi");
+  while ((m = beforeKeyword.exec(text))) {
+    push(m[1]!, 10, "near_keyword", keywordBoost(m[0]!));
   }
 
   const separatedDigits = /((?:\d[\s-]?){4,8})/g;
@@ -54,14 +130,13 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
     if (joined.length < 4 || joined.length > 8) continue;
     // Avoid promoting generic numbers too much.
     const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
-    candidates.push({ code: joined, score: 4 + keywordBoost(ctx), reason: "separated_digits" });
+    push(joined, 4, "separated_digits", keywordBoost(ctx));
   }
 
   const plain = /\b(\d{4,8})\b/g;
   while ((m = plain.exec(text))) {
-    const code = m[1]!;
     const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
-    candidates.push({ code, score: 2 + keywordBoost(ctx), reason: "plain_digits" });
+    push(m[1]!, 2, "plain_digits", keywordBoost(ctx));
   }
 
   // De-dupe: keep best score per code.
@@ -126,5 +201,4 @@ export function extractTtlSec(raw: string): number | null {
   }
   return best;
 }
-
 
