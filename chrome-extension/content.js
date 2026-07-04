@@ -16,9 +16,13 @@ function likelyOtp(el) {
   if (ac === "one-time-code" || ac === "otp") return true;
   const n = `${el.name || ""} ${el.id || ""} ${el.getAttribute("aria-label") || ""}`.toLowerCase();
   if (/(otp|one.?time|code|verify|verification|pin)/.test(n)) return true;
-  if (el.maxLength >= 4 && el.maxLength <= 8) return true;
+  if (el.maxLength >= 4 && el.maxLength <= 10) return true;
   if ((el.inputMode || "").toLowerCase() === "numeric") return true;
   return false;
+}
+
+function normalizeOtpCode(code) {
+  return String(code || "").trim().replace(/[\s-]+/g, "");
 }
 
 function setNativeValue(input, value) {
@@ -122,7 +126,7 @@ function findOtpTarget() {
     .filter(likelyOtp)
     .filter((el) => el.maxLength === 1);
 
-  if (candidates.length >= 4 && candidates.length <= 8) {
+  if (candidates.length >= 4 && candidates.length <= 10) {
     // Sort left-to-right, top-to-bottom.
     const sorted = candidates.slice().sort((a, b) => {
       const ra = a.getBoundingClientRect();
@@ -175,8 +179,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     if (msg.type === "OTP_FILL") {
-      const code = String(msg.code || "").replace(/\D/g, "");
-      if (code.length < 4) {
+      const code = normalizeOtpCode(msg.code);
+      if (!/^[A-Za-z0-9]{4,10}$/.test(code)) {
         sendResponse({ ok: false, error: "invalid_code" });
         return;
       }
@@ -194,11 +198,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
 
-      const digits = code.split("");
-      const inputs = target.inputs.slice(0, digits.length);
+      const chars = code.split("");
+      const inputs = target.inputs.slice(0, chars.length);
       for (let i = 0; i < inputs.length; i++) {
         inputs[i].focus();
-        setNativeValue(inputs[i], digits[i] || "");
+        setNativeValue(inputs[i], chars[i] || "");
       }
       sendResponse({ ok: true });
       return;
@@ -207,4 +211,3 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   return true;
 });
-
