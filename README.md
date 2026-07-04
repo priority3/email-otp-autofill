@@ -14,6 +14,10 @@ The Chrome extension polls an **agent** service. The agent connects to your
 mailbox over IMAP / OAuth, extracts the latest verification code, and the
 extension fills it into the focused input when you press the hotkey.
 
+For Gmail, the agent supports **Google Cloud Pub/Sub push notifications** —
+when a new email arrives, Google pushes a notification to the agent in
+real-time, eliminating polling delays and reducing API quota usage.
+
 | Popup | Settings |
 | --- | --- |
 | ![Extension popup showing a fetched OTP](docs/screenshots/popup.png) | ![Extension settings with agent status and mailbox accounts](docs/screenshots/settings.png) |
@@ -37,6 +41,9 @@ Two ways to connect:
 
 - **Mailboxes**: QQ Mail (IMAP auth code), Outlook (OAuth device-code flow), and
   Gmail (OAuth authorization-code flow). Multiple accounts run in parallel.
+- **Gmail Pub/Sub push**: real-time OTP delivery via Google Cloud Pub/Sub —
+  zero polling delay, lower API quota usage. Falls back to polling if Pub/Sub
+  is not configured.
 - **OTP extraction**: keyword + scoring match for 4–8 digit codes (中/English
   keywords), with automatic validity-window detection (10s–24h).
 - **Hotkey autofill**: `⌘/Ctrl + Shift + .` finds the OTP input and fills it; a
@@ -54,7 +61,8 @@ Two ways to connect:
 
 Beyond MVP: QQ IMAP, Outlook OAuth (Graph device-code), and Gmail OAuth are
 working; multi-tenant with SQLite-backed persistence and at-rest credential
-encryption; one-command Docker deploy.
+encryption; one-command Docker deploy. Gmail supports **Pub/Sub push
+notifications** for real-time OTP delivery.
 
 ## Load the extension
 
@@ -98,6 +106,19 @@ Click the extension icon → `Settings`. Confirm the `Agent` status at the top i
   and Client Secret → paste them in the extension's Gmail settings → `Start
   Sign-in`, authorize in your browser → the connection is established
   automatically.
+
+  **Optional: Pub/Sub push (recommended for production)** — for real-time OTP
+  delivery without polling:
+  1. In [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub),
+     create a topic (e.g. `gmail-notifications`) and a push subscription
+     pointing to `https://your.domain/v1/gmail/pubsub`.
+  2. In the subscription's push settings, set the **audience** to your agent's
+     pubsub endpoint URL.
+  3. In the agent's admin panel (`/admin`), set the Google OAuth credentials
+     and Pub/Sub audience, then configure the topic name in the user's Gmail
+     settings.
+  4. The agent will automatically register a Gmail watch (7-day expiration,
+     auto-renewed) and process incoming push notifications.
 
 > A saved auth code/password is masked with dots (••••) the next time you open
 > Settings; click the **eye** icon at the right of the field to reveal it.

@@ -81,7 +81,11 @@ export async function startServer() {
   app.disable("x-powered-by");
   app.use(cors);
   app.use(noStore);
-  app.use(express.json({ limit: "256kb" }));
+  // Skip JSON parsing for the Pub/Sub webhook — it receives raw push bodies.
+  app.use((req, res, next) => {
+    if (req.path === "/v1/gmail/pubsub" && req.method === "POST") return next();
+    return express.json({ limit: "256kb" })(req, res, next);
+  });
   app.use(requireClientHeader);
 
   const store = new OtpStore();
@@ -447,7 +451,7 @@ export async function startServer() {
 
   // Pub/Sub push webhook — Google sends new-mail notifications here.
   // This endpoint is NOT behind requireAuth; it uses OIDC token verification instead.
-  app.post("/v1/gmail/pubsub", express.raw({ type: "application/json" }), async (req, res) => {
+  app.post("/v1/gmail/pubsub", express.raw({ type: "*/*", limit: "1mb" }), async (req, res) => {
     try {
       // Verify OIDC token from Google Pub/Sub.
       const token = extractBearerToken(String(req.headers.authorization || ""));
@@ -460,8 +464,8 @@ export async function startServer() {
         return res.status(403).json({ ok: false, error: "no_email_in_token" });
       }
 
-      // Decode the Pub/Sub message body.
-      const rawBody = typeof req.body === "string" ? req.body : req.body?.toString("utf8") ?? "";
+      // Decode the Pub/Sub message body (express.raw() gives us a Buffer).
+      const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body);
       const envelope = JSON.parse(rawBody) as {
         message?: { data?: string; attributes?: Record<string, string> };
         subscription?: string;
