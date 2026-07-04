@@ -279,8 +279,12 @@
       let USERS = [];
       let INVITES = [];
 
+      // Derive API base path from the page location so the admin panel works
+      // behind a reverse proxy prefix (e.g. /otp/admin → API base is /otp).
+      const API_BASE = window.location.pathname.replace(/\/admin\/?$/, "");
+
       async function api(path, opts = {}) {
-        const res = await fetch(path, {
+        const res = await fetch(API_BASE + path, {
           ...opts,
           headers: {
             "content-type": "application/json",
