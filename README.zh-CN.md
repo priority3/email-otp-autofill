@@ -12,6 +12,9 @@
 Chrome 扩展轮询一个 **agent** 服务。agent 通过 IMAP / OAuth 连接你的邮箱，提取最新
 验证码；当你按下快捷键时，扩展把它填进当前聚焦的输入框。
 
+对于 Gmail，agent 支持 **Google Cloud Pub/Sub 推送通知**——当新邮件到达时，Google
+会实时推送到 agent，消除轮询延迟并减少 API 配额消耗。
+
 | 验证码弹窗（Popup） | 设置（Settings） |
 | --- | --- |
 | ![扩展弹窗显示抓取到的验证码](docs/screenshots/popup.png) | ![扩展设置页：agent 状态与邮箱账号](docs/screenshots/settings.png) |
@@ -32,6 +35,7 @@ Chrome 扩展轮询一个 **agent** 服务。agent 通过 IMAP / OAuth 连接你
 ## 功能特性
 
 - **邮箱**：QQ 邮箱（IMAP 授权码）、Outlook（OAuth 设备码流程）与 Gmail（OAuth 授权码流程），多账号并行运行。
+- **Gmail Pub/Sub 推送**：通过 Google Cloud Pub/Sub 实时获取验证码——零轮询延迟，更低 API 配额消耗。未配置 Pub/Sub 时自动回退到轮询模式。
 - **验证码提取**：关键词 + 打分匹配 4–8 位验证码（中 / 英文关键词），自动识别有效期
   窗口（10 秒–24 小时）。
 - **快捷键填充**：`⌘/Ctrl + Shift + .` 定位验证码输入框并填充；工具栏红色角标提示有
@@ -47,7 +51,7 @@ Chrome 扩展轮询一个 **agent** 服务。agent 通过 IMAP / OAuth 连接你
 ## 当前状态
 
 已超出 MVP：QQ IMAP、Outlook OAuth（Graph 设备码）与 Gmail OAuth 均可用；多租户 + SQLite 持久化 +
-凭据静态加密；一条命令 Docker 部署。
+凭据静态加密；一条命令 Docker 部署。Gmail 支持 **Pub/Sub 推送通知**，实现实时验证码获取。
 
 ## 加载扩展
 
@@ -72,6 +76,15 @@ Chrome → `chrome://extensions` → 开启开发者模式 → **加载已解压
 - **QQ 邮箱（IMAP）**：登录 [QQ 邮箱网页版](https://mail.qq.com) → 设置 → 账号 → 开启「IMAP/SMTP 服务」→ 按提示短信验证 → 得到 **授权码**（不是登录密码）。把 QQ 邮箱和授权码填入设置页 → `保存 QQ`。
 - **Outlook（OAuth，推荐）**：在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) 新建注册（账户类型选「Personal Microsoft accounts only」）→ Authentication → Add a platform → Mobile and desktop applications → 选择或填写 `https://login.microsoftonline.com/common/oauth2/nativeclient` → 将「Allow public client flows」设为 Yes → 复制 Application (client) ID 填入 → `保存 Client ID` → `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
 - **Gmail（OAuth）**：在 [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials) 创建 OAuth 2.0 客户端 ID（类型选「Web 应用」）→ 记下 Client ID 和 Client Secret → 填入扩展的 Gmail 设置 → `开始登录`，在浏览器完成授权 → 连接自动建立。
+
+  **可选：Pub/Sub 推送（生产环境推荐）**——实现零轮询实时获取验证码：
+  1. 在 [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub)
+     创建一个主题（如 `gmail-notifications`）和一个推送订阅，推送地址设为
+     `https://your.domain/v1/gmail/pubsub`。
+  2. 在订阅的推送设置中，将**受众（audience）**设为 agent 的 pubsub 端点 URL。
+  3. 在 agent 管理后台（`/admin`）设置 Google OAuth 凭据和 Pub/Sub 受众，然后在用户的
+     Gmail 设置中配置主题名称。
+  4. agent 会自动注册 Gmail watch（7 天有效期，自动续期）并处理收到的推送通知。
 
 > 已保存的授权码/密码下次打开设置页会以圆点（••••）回填，点字段右侧的**小眼睛**即可查看明文。
 
