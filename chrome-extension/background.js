@@ -335,13 +335,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
     }
 
-    // Standard OAuth authorization code exchange (for browser-based sign-in).
-    if (msg.type === "BG_GMAIL_AUTH_COMPLETE") {
-      const json = await agentFetch("/v1/gmail/auth/complete", {
+    // Browser-redirect OAuth: ask the agent for the Google consent URL. We pass
+    // our configured agent base URL so the redirect_uri matches how the agent is
+    // reached (proxy path prefixes, https). The options page opens the returned
+    // URL in a tab; Google then redirects the browser to the agent's callback.
+    if (msg.type === "BG_GMAIL_AUTH_URL") {
+      const s = await getSettings();
+      const baseUrl = s.agentBaseUrl.replace(/\/$/, "");
+      const json = await agentFetch("/v1/gmail/auth/url", {
         method: "POST",
-        body: JSON.stringify({ code: msg.code, redirectUri: msg.redirectUri })
+        body: JSON.stringify({ baseUrl })
       });
-      sendResponse({ ok: true, result: json.result });
+      sendResponse({ ok: true, url: json.url });
       return;
     }
   })()
