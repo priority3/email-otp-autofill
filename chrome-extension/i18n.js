@@ -157,6 +157,7 @@
       pending: "Pending ({err})",
       oauth_waiting: "Waiting for Microsoft authorization… checking every {sec}s.",
       oauth_waiting_browser: "Waiting for Google authorization in browser…",
+      gmail_auth_timeout: "Timed out waiting for authorization. Please try again.",
       device_code_msg: "Open {uri} and enter code {code} (expires in {sec}s).",
 
       // --- toast (background → content) ---
@@ -302,6 +303,7 @@
       pending: "等待中（{err}）",
       oauth_waiting: "等待 Microsoft 授权中…每 {sec} 秒自动检查。",
       oauth_waiting_browser: "正在等待 Google 浏览器授权…",
+      gmail_auth_timeout: "等待授权超时，请重试。",
       device_code_msg: "打开 {uri} 并输入代码 {code}（{sec} 秒后过期）。",
       outlook_oauth_desc: "使用 OAuth 连接 Outlook 邮箱。",
 

@@ -15,6 +15,7 @@ import {
   requireAuth,
   resolveSession,
 } from "./http/auth.js";
+import { consumeOAuthState, createOAuthState } from "./http/oauth-state.js";
 import { OtpStore } from "./otp/store.js";
 import { ProviderManager, ProviderRegistry } from "./providers/manager.js";
 import { verifyImap } from "./providers/imap.js";
@@ -173,7 +174,7 @@ export async function startServer() {
     if (!p.startsWith("/v1/")) return next();
     if (p === "/v1/status" || p.startsWith("/v1/auth/") || p.startsWith("/v1/admin/")) return next();
     if (p === "/v1/gmail/pubsub" && req.method === "POST") return next();
-    if (p === "/v1/gmail/auth/callback") return next(); // OAuth redirect from Google
+    if (p === "/v1/gmail/auth/callback") return next(); // OAuth redirect from Google (identity via state)
     return requireAuth(req, res, next);
   });
 
@@ -402,48 +403,73 @@ export async function startServer() {
     }
   });
 
-  // Standard OAuth authorization code flow (for browser-based sign-in).
-  app.post("/v1/gmail/auth/complete", async (req, res) => {
-    const Body = z.object({ code: z.string().min(1), redirectUri: z.string().min(1) });
+  // Browser-redirect OAuth flow (Web application sign-in).
+  //
+  // Step 1: the extension (authenticated) asks for the Google consent URL. It
+  // passes its configured agent base URL so the redirect_uri matches exactly how
+  // the agent is reached (handles reverse-proxy path prefixes and https). We mint
+  // a one-time `state` bound to this user + redirect_uri, then hand back the URL
+  // for the extension to open in a normal browser tab.
+  app.post("/v1/gmail/auth/url", async (req, res) => {
+    const Body = z.object({
+      baseUrl: z
+        .string()
+        .url()
+        .refine((u) => /^https?:$/.test(new URL(u).protocol), "http(s) only"),
+    });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
-    try {
-      const mgr = await mgrFor(req);
-      const r = await mgr.getGmailOAuth().exchangeCodeForTokens(body.data.code, body.data.redirectUri);
-      await mgr.reconcile();
-      res.json({ ok: true, result: { status: "success", token: r } });
-    } catch (e) {
-      res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
+
+    const clientId = getGoogleClientId();
+    if (!clientId || !getGoogleClientSecret()) {
+      return res.status(400).json({ ok: false, error: "google_credentials_not_set" });
     }
+
+    const base = body.data.baseUrl.replace(/\/+$/, "");
+    const redirectUri = `${base}/v1/gmail/auth/callback`;
+    const state = createOAuthState(String(req.userId), redirectUri);
+
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", "openid email profile https://www.googleapis.com/auth/gmail.readonly");
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("prompt", "consent");
+    url.searchParams.set("state", state);
+
+    res.json({ ok: true, url: url.toString(), redirectUri });
   });
 
-  // OAuth callback — Google redirects here after user grants consent.
-  // The `state` query param carries the user's auth token.
+  // Step 2: Google redirects the user's browser here after consent. This endpoint
+  // is NOT behind the session/client-header guards (a browser navigation carries
+  // neither) — identity comes from the one-time `state` minted in step 1.
   app.get("/v1/gmail/auth/callback", async (req, res) => {
+    const esc = (s: string) => s.replace(/[<>&"]/g, (c) => `&#${c.charCodeAt(0)};`);
+    const page = (title: string, body: string) =>
+      `<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+      `<body style="font-family:system-ui;max-width:32rem;margin:4rem auto;text-align:center;">` +
+      `<h2>${title}</h2><p>${body}</p></body>`;
+
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const state = typeof req.query.state === "string" ? req.query.state : "";
     const error = typeof req.query.error === "string" ? req.query.error : "";
 
-    if (error) {
-      return res.status(400).send(`<html><body><h2>Authorization Failed</h2><p>${error}</p></body></html>`);
-    }
-    if (!code || !state) {
-      return res.status(400).send(`<html><body><h2>Missing Parameters</h2><p>code and state are required.</p></body></html>`);
-    }
+    if (error) return res.status(400).send(page("Authorization failed", esc(error)));
+    if (!code || !state) return res.status(400).send(page("Missing parameters", "code and state are required."));
 
-    const userId = resolveSession(state);
-    if (!userId) {
-      return res.status(401).send(`<html><body><h2>Invalid Session</h2><p>Your session has expired. Please try again.</p></body></html>`);
+    const st = consumeOAuthState(state);
+    if (!st) {
+      return res.status(401).send(page("Session expired", "This sign-in link is no longer valid. Please try again from the extension."));
     }
 
     try {
-      const mgr = await registry.getOrCreate(userId);
-      const redirectUri = "https://www.qiyi.click/otp/v1/gmail/auth/callback";
-      const r = await mgr.getGmailOAuth().exchangeCodeForTokens(code, redirectUri);
+      const mgr = await registry.getOrCreate(st.userId);
+      await mgr.getGmailOAuth().exchangeCodeForTokens(code, st.redirectUri);
       await mgr.reconcile();
-      res.status(200).send(`<html><body><h2>Gmail Connected!</h2><p>You can close this tab and return to the extension.</p></body></html>`);
+      res.status(200).send(page("Gmail connected 🎉", "You can close this tab and return to the extension."));
     } catch (e) {
-      res.status(400).send(`<html><body><h2>Error</h2><p>${String((e as any)?.message || e)}</p></body></html>`);
+      res.status(400).send(page("Error", esc(String((e as any)?.message || e))));
     }
   });
 
@@ -567,6 +593,9 @@ export async function startServer() {
       requireInvite: isInviteRequired(),
       outlookClientId: getOutlookClientId(),
       googleClientId: getGoogleClientId(),
+      // Returned so the admin can view/edit it behind a masked field. Only ever
+      // sent to the admin-token-gated panel, never to end-user clients.
+      googleClientSecret: getGoogleClientSecret(),
       pubsubAudience: getPubSubAudience(),
     });
   });
