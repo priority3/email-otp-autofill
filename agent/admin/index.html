@@ -257,13 +257,24 @@
             📌 获取步骤：打开
             <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="color:var(--accent);">Google Cloud Console · Credentials</a>
             → Create Credentials → OAuth client ID → Application type 选 Web application →
-            Authorized redirect URIs 添加 <code>https://&lt;your-agent-host&gt;/v1/gmail/auth/callback</code>（如使用扩展浏览器流程则留空，扩展会自动处理）→
             复制 Client ID 和 Client Secret 填入下方。
+          </div>
+          <div class="msg" style="margin-bottom:8px;">
+            ⚠️ 必做：把下面这条加入该 OAuth 客户端的「Authorized redirect URIs」，否则报 <code>redirect_uri_mismatch</code>：
+            <br />
+            <code id="gmailRedirectUri" style="display:inline-block;margin-top:4px;">（加载中…）</code>
           </div>
           <label for="googleClientId">Google Client ID</label>
           <input id="googleClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" />
           <label for="googleClientSecret" style="margin-top:8px;">Google Client Secret</label>
-          <input id="googleClientSecret" type="password" placeholder="GOCSPX-xxxxxxxxxxxx" autocomplete="off" />
+          <div class="pwd-wrap">
+            <input id="googleClientSecret" type="password" placeholder="GOCSPX-xxxxxxxxxxxx" autocomplete="off" />
+            <button type="button" class="pwd-toggle" id="googleSecretToggle" aria-label="显示密码">
+              <svg id="googleSecretEye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
           <div class="row" style="margin-top:12px;">
             <button class="primary" id="saveGoogleCreds">保存</button>
             <span class="msg" id="googleCredsMsg"></span>
@@ -331,6 +342,9 @@
         }
         if (document.activeElement !== $("googleClientId")) {
           $("googleClientId").value = s.googleClientId || "";
+        }
+        if (document.activeElement !== $("googleClientSecret")) {
+          $("googleClientSecret").value = s.googleClientSecret || "";
         }
         $("tabUsersCount").textContent = s.users.total ? `(${s.users.total})` : "";
         $("tabInvitesCount").textContent = s.invites.total ? `(${s.invites.total})` : "";
@@ -443,6 +457,14 @@
         $("pwdToggle").setAttribute("aria-label", showing ? "显示密码" : "隐藏密码");
       });
 
+      $("googleSecretToggle").addEventListener("click", () => {
+        const input = $("googleClientSecret");
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        $("googleSecretEye").innerHTML = showing ? EYE_ICON : EYE_OFF_ICON;
+        $("googleSecretToggle").setAttribute("aria-label", showing ? "显示密码" : "隐藏密码");
+      });
+
       $("loginBtn").addEventListener("click", login);
       $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
       $("logoutBtn").addEventListener("click", logout);
@@ -487,7 +509,6 @@
           const r = await api("/v1/admin/settings", { method: "POST", body: JSON.stringify(body) });
           if ((r.googleClientId || "") !== googleClientId) throw new Error("google_creds_not_saved");
           $("googleCredsMsg").textContent = "已保存。";
-          $("googleClientSecret").value = "";
           await loadStats();
           setTimeout(() => ($("googleCredsMsg").textContent = ""), 2500);
         } catch { $("googleCredsMsg").textContent = "保存失败"; }
@@ -529,6 +550,18 @@
           await loadStats(); await loadUsers();
         }
       });
+
+      // Show the exact Gmail OAuth redirect URI to register in Google Cloud.
+      // Derived from how this admin page was reached, so it already includes any
+      // reverse-proxy path prefix. Admins must register the identical string.
+      (function showGmailRedirectUri() {
+        try {
+          const u = new URL(location.href);
+          const base = u.origin + u.pathname.replace(/\/admin\/?$/, "");
+          const el = document.getElementById("gmailRedirectUri");
+          if (el) el.textContent = base + "/v1/gmail/auth/callback";
+        } catch { /* leave placeholder */ }
+      })();
 
       if (TOKEN) { login(); }
     </script>

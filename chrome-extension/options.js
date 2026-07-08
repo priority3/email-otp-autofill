@@ -285,6 +285,8 @@ async function refreshGmailOAuthState() {
       const gm = r.status.config.gmail || {};
       const connected = !!gm.oauthConnected;
       setMsg("gmailState", T(connected ? "oauth_connected" : (gm.clientIdSet ? "oauth_not_connected" : "gmail_no_client_id")));
+      // Clear any stale "starting…" left over from a prior auth attempt.
+      setMsg("gmailDeviceCodeMsg", "");
       toggleGmailActions(connected);
     }
   } catch {
@@ -785,68 +787,54 @@ function wireOauth() {
   });
 }
 
+// Poll the agent status until Gmail OAuth reports connected, or time out.
+// Used after opening the consent tab: the token lands on the agent via the
+// browser-redirect callback, so the options page has to watch for the result.
+async function pollGmailConnected(timeoutMs, intervalMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      const r = await bg({ type: "BG_AGENT_STATUS" });
+      if (r && r.ok && r.status && r.status.config && r.status.config.gmail && r.status.config.gmail.oauthConnected) {
+        return true;
+      }
+    } catch {
+      // agent momentarily unreachable — keep polling
+    }
+  }
+  return false;
+}
+
 function wireGmailOauth() {
   $("gmailAuthStart").addEventListener("click", async () => {
-    setMsg("gmailDeviceCodeMsg", T("starting"));
-    setMsg("gmailOauthMsg", "");
+    setMsg("gmailDeviceCodeMsg", "");
+    setMsg("gmailOauthMsg", T("starting"));
     $("gmailAuthStart").disabled = true;
 
     try {
-      // Get the client ID from the server status
-      const statusR = await bg({ type: "BG_AGENT_STATUS" });
-      const clientId = statusR?.ok && statusR?.status?.config?.gmail?.clientId;
-      if (!clientId) {
-        setMsg("gmailOauthMsg", T("gmail_no_client_id"));
+      // Ask the agent for the Google consent URL (it mints the state + redirect_uri).
+      const r = await bg({ type: "BG_GMAIL_AUTH_URL" });
+      if (!r || !r.ok || !r.url) {
+        setMsg("gmailOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
         $("gmailAuthStart").disabled = false;
         return;
       }
 
-      // Use chrome.identity.launchWebAuthFlow for standard OAuth
-      const redirectUri = chrome.identity.getRedirectURL();
-      const scopes = ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"];
-      const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-      authUrl.searchParams.set("client_id", clientId);
-      authUrl.searchParams.set("redirect_uri", redirectUri);
-      authUrl.searchParams.set("response_type", "code");
-      authUrl.searchParams.set("scope", scopes.join(" "));
-      authUrl.searchParams.set("access_type", "offline");
-      authUrl.searchParams.set("prompt", "consent");
-
+      // Open Google's consent screen in a normal tab. After the user grants access,
+      // Google redirects the browser to the agent's callback, which stores the token.
+      window.open(r.url, "_blank");
       setMsg("gmailOauthMsg", T("oauth_waiting_browser"));
 
-      const responseUrl = await chrome.identity.launchWebAuthFlow({
-        url: authUrl.toString(),
-        interactive: true,
-      });
-
-      if (!responseUrl) {
-        setMsg("gmailOauthMsg", T("failed"));
-        $("gmailAuthStart").disabled = false;
-        return;
-      }
-
-      // Extract the authorization code from the redirect URL
-      const url = new URL(responseUrl);
-      const code = url.searchParams.get("code");
-      if (!code) {
-        const error = url.searchParams.get("error") || "no_code";
-        setMsg("gmailOauthMsg", T("failed_with", { err: error }));
-        $("gmailAuthStart").disabled = false;
-        return;
-      }
-
-      // Send the code to the server to exchange for tokens
-      setMsg("gmailOauthMsg", T("saving"));
-      const r = await bg({ type: "BG_GMAIL_AUTH_COMPLETE", code, redirectUri });
-
-      if (r && r.ok) {
+      const connected = await pollGmailConnected(120000, 2000);
+      if (connected) {
         setMsg("gmailOauthMsg", T("connected"));
         toggleGmailActions(true);
         await refreshStatus();
         await refreshGmailOAuthState();
         setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
       } else {
-        setMsg("gmailOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+        setMsg("gmailOauthMsg", T("gmail_auth_timeout"));
       }
     } catch (e) {
       setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
