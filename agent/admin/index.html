@@ -245,6 +245,29 @@
             <button class="primary" id="saveClientId">保存</button>
             <span class="msg" id="clientIdMsg"></span>
           </div>
+
+          <hr style="margin:20px 0;border-color:var(--border);" />
+
+          <div class="msg" style="margin-bottom:8px;font-weight:600;">Google OAuth（Gmail）</div>
+          <div class="msg" style="margin-bottom:4px;">
+            在 Google Cloud Console 注册一个 OAuth 2.0 Web 应用，将 Client ID 和 Client Secret 填入此处。
+            所有用户的 Gmail OAuth 授权共用它。
+          </div>
+          <div class="msg" style="margin-bottom:8px;">
+            📌 获取步骤：打开
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="color:var(--accent);">Google Cloud Console · Credentials</a>
+            → Create Credentials → OAuth client ID → Application type 选 Web application →
+            Authorized redirect URIs 添加 <code>https://&lt;your-agent-host&gt;/v1/gmail/auth/callback</code>（如使用扩展浏览器流程则留空，扩展会自动处理）→
+            复制 Client ID 和 Client Secret 填入下方。
+          </div>
+          <label for="googleClientId">Google Client ID</label>
+          <input id="googleClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" />
+          <label for="googleClientSecret" style="margin-top:8px;">Google Client Secret</label>
+          <input id="googleClientSecret" type="password" placeholder="GOCSPX-xxxxxxxxxxxx" autocomplete="off" />
+          <div class="row" style="margin-top:12px;">
+            <button class="primary" id="saveGoogleCreds">保存</button>
+            <span class="msg" id="googleCredsMsg"></span>
+          </div>
         </div>
       </div>
     </main>
@@ -256,8 +279,12 @@
       let USERS = [];
       let INVITES = [];
 
+      // Derive API base path from the page location so the admin panel works
+      // behind a reverse proxy prefix (e.g. /otp/admin → API base is /otp).
+      const API_BASE = window.location.pathname.replace(/\/admin\/?$/, "");
+
       async function api(path, opts = {}) {
-        const res = await fetch(path, {
+        const res = await fetch(API_BASE + path, {
           ...opts,
           headers: {
             "content-type": "application/json",
@@ -302,12 +329,15 @@
         if (document.activeElement !== $("outlookClientId")) {
           $("outlookClientId").value = s.outlookClientId || "";
         }
+        if (document.activeElement !== $("googleClientId")) {
+          $("googleClientId").value = s.googleClientId || "";
+        }
         $("tabUsersCount").textContent = s.users.total ? `(${s.users.total})` : "";
         $("tabInvitesCount").textContent = s.invites.total ? `(${s.invites.total})` : "";
       }
 
       // ---- users ----
-      const MAIL_ICON = { qq: "📩", outlook_oauth: "🔑" };
+      const MAIL_ICON = { qq: "📩", outlook_oauth: "🔑", gmail_oauth: "📧" };
       function mailboxBadges(list) {
         if (!list || !list.length) return '<span style="color:var(--faint)">—</span>';
         return list.map((m) => {
@@ -439,6 +469,28 @@
           await loadStats();
           setTimeout(() => ($("clientIdMsg").textContent = ""), 2500);
         } catch { $("clientIdMsg").textContent = "保存失败"; }
+      });
+
+      $("saveGoogleCreds").addEventListener("click", async () => {
+        const googleClientId = $("googleClientId").value.trim();
+        const googleClientSecret = $("googleClientSecret").value.trim();
+        $("googleCredsMsg").textContent = "保存中…";
+        try {
+          const body = {};
+          if (googleClientId) body.googleClientId = googleClientId;
+          if (googleClientSecret) body.googleClientSecret = googleClientSecret;
+          if (!googleClientId && !googleClientSecret) {
+            // Clear both
+            body.googleClientId = "";
+            body.googleClientSecret = "";
+          }
+          const r = await api("/v1/admin/settings", { method: "POST", body: JSON.stringify(body) });
+          if ((r.googleClientId || "") !== googleClientId) throw new Error("google_creds_not_saved");
+          $("googleCredsMsg").textContent = "已保存。";
+          $("googleClientSecret").value = "";
+          await loadStats();
+          setTimeout(() => ($("googleCredsMsg").textContent = ""), 2500);
+        } catch { $("googleCredsMsg").textContent = "保存失败"; }
       });
 
       $("genBtn").addEventListener("click", async () => {

@@ -1,5 +1,6 @@
 import { ImapOtpWatcher } from "./imap.js";
 import { OutlookOAuthProvider } from "./outlook-oauth.js";
+import { GmailOAuthProvider } from "./gmail-oauth.js";
 import type { OtpStore } from "../otp/store.js";
 import type { AppConfig } from "../storage/config.js";
 import { loadConfig, saveConfig } from "../storage/config.js";
@@ -16,12 +17,14 @@ export class ProviderManager {
   // Multi-account: one IMAP watcher per mailbox, keyed by email.
   private qq = new Map<string, Watcher>();
   private outlookOAuth: OutlookOAuthProvider; // single-account per user
+  private gmailOAuth: GmailOAuthProvider; // single-account per user
 
   constructor(store: OtpStore, config: AppConfig, userId: string = LOCAL_USER_ID) {
     this.store = store;
     this.userId = userId;
     this.config = config;
     this.outlookOAuth = new OutlookOAuthProvider(store, userId);
+    this.gmailOAuth = new GmailOAuthProvider(store, userId);
   }
 
   private kcQq(email: string) {
@@ -35,6 +38,10 @@ export class ProviderManager {
 
   getOutlookOAuth() {
     return this.outlookOAuth;
+  }
+
+  getGmailOAuth() {
+    return this.gmailOAuth;
   }
 
   async reloadConfig(): Promise<void> {
@@ -51,8 +58,31 @@ export class ProviderManager {
 
   async reconcile(): Promise<void> {
     await this.reconcileQq();
-    // OAuth poller is cheap; it exits early if not connected.
+    // OAuth pollers are cheap; they exit early if not connected.
     this.outlookOAuth.startPolling(this.config.pollIntervalMs);
+
+    // Gmail: prefer Pub/Sub push, fall back to polling.
+    const gmailOAuth = this.gmailOAuth;
+    await gmailOAuth.loadPubSubState();
+
+    if (this.config.gmail.pubsubEnabled && this.config.gmail.topicName) {
+      // Pub/Sub mode: renew watch only if it was previously active.
+      // First-time watch registration must be done via /v1/gmail/pubsub/start.
+      const pubsubStatus = gmailOAuth.pubsubStatus();
+      if (pubsubStatus.expiration > 0) {
+        await gmailOAuth.renewWatchIfNeeded(this.config.gmail.topicName);
+      }
+      const updatedStatus = gmailOAuth.pubsubStatus();
+      if (updatedStatus.active) {
+        gmailOAuth.stop();
+      } else {
+        gmailOAuth.stop();
+        console.warn("[otp-agent] gmail pubsub watch inactive, not polling to preserve quota");
+      }
+    } else {
+      // Pub/Sub not configured — use polling.
+      gmailOAuth.startPolling(this.config.pollIntervalMs);
+    }
   }
 
   // Stop all watchers for this user (used when removing a user / shutting down).
@@ -60,6 +90,7 @@ export class ProviderManager {
     for (const [, w] of this.qq) w.watcher.stop();
     this.qq.clear();
     this.outlookOAuth.stop();
+    this.gmailOAuth.stop();
   }
 
   // Diff the configured QQ accounts against running watchers: stop removed ones,

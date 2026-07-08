@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlg0wcV2O8bMG6WQcm/7A0X7vwWR8INkO/z5k6HQuBkyYxejnA6onreML9qUIxxweDEqe6s5U2R8CWWTDE72itr8wZG0MNY11t5HbRztbT8hHI2E//kfd2WBBI+Ih/2d80gdv/bdRsyHFrXz2ELJyIIcduMEWFxcDYqzKjYD45HJTuk/+W94XQixg2m3ZB1vTa0W7hVeHNLnk7Y/hKz0YI33Zrh3exPeh99TXKo/okGBqOhizL/ePk4VZGPdHyFxlh//pZ2yGilVKvsJ0qzfAyEWaTdtnWWC1pOhmaZVNii8H4wrftI8ugXddPaowhdtk1+TNrU4DQ3/6ahgTKUz9BwIDAQAB",
   "name": "Email OTP Autofill",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Fetch OTP codes from an agent (QQ Mail / Outlook) and fill into the current page.",
-  "permissions": ["storage", "activeTab", "tabs", "alarms"],
+  "permissions": ["storage", "activeTab", "tabs", "alarms", "identity"],
   "host_permissions": ["https://otp.razet.me/*", "http://127.0.0.1:17373/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {

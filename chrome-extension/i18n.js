@@ -55,6 +55,7 @@
       account_type: "Account type",
       type_qq: "QQ Mail (IMAP)",
       type_outlook_oauth: "Outlook (OAuth)",
+      type_gmail_oauth: "Gmail (OAuth)",
       remove_account: "Remove",
       removing: "Removing…",
       no_account_selected: "No account selected",
@@ -150,10 +151,12 @@
       oauth_connected: "OAuth connected",
       oauth_not_connected: "OAuth not connected",
       oauth_no_client_id: "Admin has not configured Outlook Client ID yet. Please contact admin.",
+      gmail_no_client_id: "Admin has not configured Google OAuth credentials yet. Please contact admin.",
       connected: "Connected.",
       expired: "Expired. Start again.",
       pending: "Pending ({err})",
       oauth_waiting: "Waiting for Microsoft authorization… checking every {sec}s.",
+      oauth_waiting_browser: "Waiting for Google authorization in browser…",
       device_code_msg: "Open {uri} and enter code {code} (expires in {sec}s).",
 
       // --- toast (background → content) ---
@@ -293,10 +296,12 @@
       oauth_connected: "OAuth 已连接",
       oauth_not_connected: "OAuth 未连接",
       oauth_no_client_id: "管理员尚未配置 Outlook Client ID，请联系管理员。",
+      gmail_no_client_id: "管理员尚未配置 Google OAuth 凭据，请联系管理员。",
       connected: "已连接。",
       expired: "已过期，请重新开始。",
       pending: "等待中（{err}）",
       oauth_waiting: "等待 Microsoft 授权中…每 {sec} 秒自动检查。",
+      oauth_waiting_browser: "正在等待 Google 浏览器授权…",
       device_code_msg: "打开 {uri} 并输入代码 {code}（{sec} 秒后过期）。",
       outlook_oauth_desc: "使用 OAuth 连接 Outlook 邮箱。",
 

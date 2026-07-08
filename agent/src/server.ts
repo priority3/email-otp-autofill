@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { AGENT_HOST, AGENT_PORT, MASTER_KEY } from "./constants.js";
 import { cors, noStore, requireClientHeader } from "./http/middleware.js";
+import { extractBearerToken, verifyGoogleOidcToken } from "./http/verify-oidc.js";
 import {
   createSession,
   destroySession,
@@ -37,17 +38,28 @@ import {
   listInvites,
   revokeInvite,
 } from "./storage/invites.js";
-import { isInviteRequired, setInviteRequired, getOutlookClientId, setOutlookClientId } from "./storage/settings.js";
+import {
+  isInviteRequired,
+  setInviteRequired,
+  getOutlookClientId,
+  setOutlookClientId,
+  getGoogleClientId,
+  setGoogleClientId,
+  getGoogleClientSecret,
+  setGoogleClientSecret,
+  getPubSubAudience,
+  setPubSubAudience,
+} from "./storage/settings.js";
 
-function parseProviders(raw: string | undefined): ("qq" | "outlook")[] | undefined {
+function parseProviders(raw: string | undefined): ("qq" | "outlook" | "gmail")[] | undefined {
   if (!raw) return undefined;
   const parts = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const set = new Set<"qq" | "outlook">();
+  const set = new Set<"qq" | "outlook" | "gmail">();
   for (const p of parts) {
-    if (p === "qq" || p === "outlook") set.add(p);
+    if (p === "qq" || p === "outlook" || p === "gmail") set.add(p);
   }
   return set.size ? [...set] : undefined;
 }
@@ -69,7 +81,11 @@ export async function startServer() {
   app.disable("x-powered-by");
   app.use(cors);
   app.use(noStore);
-  app.use(express.json({ limit: "256kb" }));
+  // Skip JSON parsing for the Pub/Sub webhook — it receives raw push bodies.
+  app.use((req, res, next) => {
+    if (req.path === "/v1/gmail/pubsub" && req.method === "POST") return next();
+    return express.json({ limit: "256kb" })(req, res, next);
+  });
   app.use(requireClientHeader);
 
   const store = new OtpStore();
@@ -149,12 +165,15 @@ export async function startServer() {
     res.json({ ok: true, user: { id: user.id, username: user.username } });
   });
 
-  // Gate: every /v1 route except status, auth, and admin requires a valid user
-  // session. Admin routes have their own requireAdmin guard.
+  // Gate: every /v1 route except status, auth, admin, and the pubsub webhook
+  // requires a valid user session. The pubsub webhook uses OIDC token auth instead.
+  // Admin routes have their own requireAdmin guard.
   app.use((req, res, next) => {
     const p = req.path;
     if (!p.startsWith("/v1/")) return next();
     if (p === "/v1/status" || p.startsWith("/v1/auth/") || p.startsWith("/v1/admin/")) return next();
+    if (p === "/v1/gmail/pubsub" && req.method === "POST") return next();
+    if (p === "/v1/gmail/auth/callback") return next(); // OAuth redirect from Google
     return requireAuth(req, res, next);
   });
 
@@ -184,6 +203,9 @@ export async function startServer() {
     const outlookOauthConnected = await mgr.getOutlookOAuth().hasRefreshToken();
     const outlookOauthEmail = outlookOauthConnected ? await mgr.getOutlookOAuth().getAccountEmail() : null;
     const outlookClientId = getOutlookClientId();
+    const gmailOauthConnected = await mgr.getGmailOAuth().hasRefreshToken();
+    const gmailOauthEmail = gmailOauthConnected ? await mgr.getGmailOAuth().getAccountEmail() : null;
+    const googleClientId = getGoogleClientId();
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
@@ -199,6 +221,13 @@ export async function startServer() {
           clientIdSet: Boolean(outlookClientId),
           oauthConnected: outlookOauthConnected,
           oauthEmail: outlookOauthEmail,
+        },
+        gmail: {
+          mode: cfg.gmail.mode,
+          clientId: googleClientId || null,
+          clientIdSet: Boolean(googleClientId) && Boolean(getGoogleClientSecret()),
+          oauthConnected: gmailOauthConnected,
+          oauthEmail: gmailOauthEmail,
         },
       },
     });
@@ -326,6 +355,202 @@ export async function startServer() {
     }
   });
 
+  // ---- Gmail ---------------------------------------------------------------
+  app.post("/v1/gmail/config", async (req, res) => {
+    const Body = z.object({ mode: z.literal("oauth") });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+
+    // Client ID and secret are instance-wide admin settings.
+    if (!getGoogleClientId() || !getGoogleClientSecret()) {
+      return res.status(400).json({ ok: false, error: "google_credentials_not_set" });
+    }
+    await mgr.updateConfig((c) => {
+      c.gmail.mode = "oauth";
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/gmail/clear", async (req, res) => {
+    const mgr = await mgrFor(req);
+    await mgr.getGmailOAuth().clearAuth();
+    await mgr.updateConfig((c) => {
+      c.gmail.mode = "oauth";
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/gmail/auth/start", async (req, res) => {
+    try {
+      const mgr = await mgrFor(req);
+      const dc = await mgr.getGmailOAuth().startDeviceCode();
+      res.json({ ok: true, deviceCode: dc });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
+    }
+  });
+
+  app.post("/v1/gmail/auth/poll", async (req, res) => {
+    try {
+      const mgr = await mgrFor(req);
+      const r = await mgr.getGmailOAuth().pollDeviceCodeOnce();
+      await mgr.reconcile();
+      res.json({ ok: true, result: r });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
+    }
+  });
+
+  // Standard OAuth authorization code flow (for browser-based sign-in).
+  app.post("/v1/gmail/auth/complete", async (req, res) => {
+    const Body = z.object({ code: z.string().min(1), redirectUri: z.string().min(1) });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    try {
+      const mgr = await mgrFor(req);
+      const r = await mgr.getGmailOAuth().exchangeCodeForTokens(body.data.code, body.data.redirectUri);
+      await mgr.reconcile();
+      res.json({ ok: true, result: { status: "success", token: r } });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
+    }
+  });
+
+  // OAuth callback — Google redirects here after user grants consent.
+  // The `state` query param carries the user's auth token.
+  app.get("/v1/gmail/auth/callback", async (req, res) => {
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const state = typeof req.query.state === "string" ? req.query.state : "";
+    const error = typeof req.query.error === "string" ? req.query.error : "";
+
+    if (error) {
+      return res.status(400).send(`<html><body><h2>Authorization Failed</h2><p>${error}</p></body></html>`);
+    }
+    if (!code || !state) {
+      return res.status(400).send(`<html><body><h2>Missing Parameters</h2><p>code and state are required.</p></body></html>`);
+    }
+
+    const userId = resolveSession(state);
+    if (!userId) {
+      return res.status(401).send(`<html><body><h2>Invalid Session</h2><p>Your session has expired. Please try again.</p></body></html>`);
+    }
+
+    try {
+      const mgr = await registry.getOrCreate(userId);
+      const redirectUri = "https://www.qiyi.click/otp/v1/gmail/auth/callback";
+      const r = await mgr.getGmailOAuth().exchangeCodeForTokens(code, redirectUri);
+      await mgr.reconcile();
+      res.status(200).send(`<html><body><h2>Gmail Connected!</h2><p>You can close this tab and return to the extension.</p></body></html>`);
+    } catch (e) {
+      res.status(400).send(`<html><body><h2>Error</h2><p>${String((e as any)?.message || e)}</p></body></html>`);
+    }
+  });
+
+  // ---- Gmail Pub/Sub -------------------------------------------------------
+
+  // Pub/Sub push webhook — Google sends new-mail notifications here.
+  // This endpoint is NOT behind requireAuth; it uses OIDC token verification instead.
+  app.post("/v1/gmail/pubsub", express.raw({ type: "*/*", limit: "1mb" }), async (req, res) => {
+    try {
+      // Verify OIDC token from Google Pub/Sub.
+      const token = extractBearerToken(String(req.headers.authorization || ""));
+      if (!token) {
+        return res.status(401).json({ ok: false, error: "missing_bearer_token" });
+      }
+      const verified = await verifyGoogleOidcToken(token, getPubSubAudience());
+      const pushEmail = verified.payload.email;
+      if (!pushEmail) {
+        return res.status(403).json({ ok: false, error: "no_email_in_token" });
+      }
+
+      // Decode the Pub/Sub message body (express.raw() gives us a Buffer).
+      const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : String(req.body);
+      const envelope = JSON.parse(rawBody) as {
+        message?: { data?: string; attributes?: Record<string, string> };
+        subscription?: string;
+      };
+      const dataB64 = envelope.message?.data ?? "";
+      const decoded = Buffer.from(dataB64, "base64").toString("utf8");
+      const payload = JSON.parse(decoded) as { emailAddress?: string; historyId?: string };
+
+      const emailAddress = payload.emailAddress ?? pushEmail;
+      const historyId = String(payload.historyId ?? "");
+      if (!historyId) {
+        return res.status(200).json({ ok: true, skipped: "no_history_id" });
+      }
+
+      // Find the user who owns this Gmail account.
+      let targetUserId: string | null = null;
+      for (const uid of await listUserIds()) {
+        const mgr = await registry.getOrCreate(uid);
+        const email = await mgr.getGmailOAuth().getAccountEmail();
+        if (email === emailAddress) {
+          targetUserId = uid;
+          break;
+        }
+      }
+
+      if (!targetUserId) {
+        console.warn(`[gmail-pubsub] no user found for ${emailAddress}`);
+        return res.status(200).json({ ok: true, skipped: "unknown_account" });
+      }
+
+      const mgr = await registry.getOrCreate(targetUserId);
+      await mgr.getGmailOAuth().handlePubSubNotification(historyId);
+      res.status(200).json({ ok: true });
+    } catch (e) {
+      const msg = String((e as any)?.message || e);
+      console.error(`[gmail-pubsub] push handler error: ${msg}`);
+      // Return 200 even on processing errors to avoid Pub/Sub retries for transient issues.
+      res.status(200).json({ ok: false, error: msg });
+    }
+  });
+
+  // Configure Pub/Sub for Gmail (enable/disable, set topic name).
+  app.post("/v1/gmail/pubsub/config", async (req, res) => {
+    const Body = z.object({
+      pubsubEnabled: z.boolean(),
+      topicName: z.string().min(1).optional(),
+    });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    await mgr.updateConfig((c) => {
+      c.gmail.pubsubEnabled = body.data.pubsubEnabled;
+      if (body.data.topicName !== undefined) c.gmail.topicName = body.data.topicName;
+    });
+    await mgr.reconcile();
+    res.json({ ok: true });
+  });
+
+  // Register Gmail watch (call users.watch on the Gmail API).
+  app.post("/v1/gmail/pubsub/start", async (req, res) => {
+    try {
+      const mgr = await mgrFor(req);
+      const topicName = mgr.config.gmail.topicName;
+      if (!topicName) {
+        return res.status(400).json({ ok: false, error: "topic_name_not_configured" });
+      }
+      const result = await mgr.getGmailOAuth().startWatch(topicName);
+      res.json({ ok: true, ...result });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: String((e as any)?.message || e) });
+    }
+  });
+
+  // Pub/Sub watch status.
+  app.get("/v1/gmail/pubsub/status", async (req, res) => {
+    const mgr = await mgrFor(req);
+    const pubsub = mgr.getGmailOAuth().pubsubStatus();
+    res.json({
+      ok: true,
+      pubsubEnabled: mgr.config.gmail.pubsubEnabled,
+      topicName: mgr.config.gmail.topicName ?? null,
+      ...pubsub,
+    });
+  });
+
   // ---- admin API (token-gated via requireAdmin) --------------------------
   app.get("/v1/admin/stats", requireAdmin, (_req, res) => {
     const now = Date.now();
@@ -341,6 +566,8 @@ export async function startServer() {
       invites: inviteStats(),
       requireInvite: isInviteRequired(),
       outlookClientId: getOutlookClientId(),
+      googleClientId: getGoogleClientId(),
+      pubsubAudience: getPubSubAudience(),
     });
   });
 
@@ -377,15 +604,25 @@ export async function startServer() {
       requireInvite: z.boolean().optional(),
       // Microsoft App (client) ID for Outlook OAuth. Empty string clears it.
       outlookClientId: z.string().trim().max(200).optional(),
+      // Google OAuth client credentials for Gmail. Empty string clears them.
+      googleClientId: z.string().trim().max(200).optional(),
+      googleClientSecret: z.string().trim().max(200).optional(),
+      // Pub/Sub Push OIDC audience (your agent's public URL).
+      pubsubAudience: z.string().trim().max(500).optional(),
     });
     const body = Body.safeParse(req.body);
     if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
     if (body.data.requireInvite !== undefined) setInviteRequired(body.data.requireInvite);
     if (body.data.outlookClientId !== undefined) setOutlookClientId(body.data.outlookClientId);
+    if (body.data.googleClientId !== undefined) setGoogleClientId(body.data.googleClientId);
+    if (body.data.googleClientSecret !== undefined) setGoogleClientSecret(body.data.googleClientSecret);
+    if (body.data.pubsubAudience !== undefined) setPubSubAudience(body.data.pubsubAudience);
     res.json({
       ok: true,
       requireInvite: isInviteRequired(),
       outlookClientId: getOutlookClientId(),
+      googleClientId: getGoogleClientId(),
+      pubsubAudience: getPubSubAudience(),
     });
   });
 
@@ -398,6 +635,10 @@ export async function startServer() {
     if (cfg.outlook.mode === "oauth" && getOutlookClientId() && (await mgr.getOutlookOAuth().hasRefreshToken())) {
       const email = await mgr.getOutlookOAuth().getAccountEmail();
       out.push({ type: "outlook_oauth", email: email || undefined });
+    }
+    if (cfg.gmail.mode === "oauth" && getGoogleClientId() && getGoogleClientSecret() && (await mgr.getGmailOAuth().hasRefreshToken())) {
+      const email = await mgr.getGmailOAuth().getAccountEmail();
+      out.push({ type: "gmail_oauth", email: email || undefined });
     }
     return out;
   }
