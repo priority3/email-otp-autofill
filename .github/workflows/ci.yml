@@ -1,0 +1,40 @@
+name: CI
+
+# Run type-check + unit tests on every PR and on pushes to main.
+# The `test` job is the required status check for merging PRs into main.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true # newer commits supersede in-flight runs on the same ref
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match the runtime in agent/Dockerfile (node:24-alpine).
+          node-version: 24
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc build)
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
