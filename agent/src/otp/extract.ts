@@ -67,16 +67,19 @@ function normalizeCandidate(code: string): string {
   return code.replace(/[\s-]+/g, "");
 }
 
-// Reject a digit run that is really a fragment of a longer number (e.g. slicing
-// 8 digits out of a 10-digit QQ account number) or the local part of an email
-// address (1832052104@qq.com). Neither is an OTP. Used by the low-confidence
-// (keyword-free) passes; `matched` is the full matched substring, `start` its
-// index in `text`. Reason: a Google security-alert email that merely mentions a
-// secondary mailbox address was surfacing "18320521" as a code.
+// Reject a digit run that is really a fragment of a longer token — a longer
+// number (slicing 8 digits out of a 10-digit QQ account), the local part of an
+// email address (1832052104@qq.com), or a hex/app id embedded in a URL path
+// (…/6efe458dfe2230acceea → "2230"). Neither is an OTP. Used by the
+// low-confidence (keyword-free) passes; `matched` is the full matched substring,
+// `start` its index in `text`.
 function isNumericFragment(text: string, start: number, matched: string): boolean {
   const before = start > 0 ? text[start - 1]! : "";
   const after = text[start + matched.length] ?? "";
-  if (/[0-9]/.test(before) || /[0-9]/.test(after)) return true; // part of a longer number
+  // Letter/digit/underscore on either side ⇒ part of a larger alphanumeric token
+  // (hex ids, path segments, long numbers). Separated-digit OTPs are bounded by
+  // spaces/punctuation, so they still pass.
+  if (/[A-Za-z0-9_]/.test(before) || /[A-Za-z0-9_]/.test(after)) return true;
   if (before === "@" || after === "@") return true; // an email address part
   return false;
 }
