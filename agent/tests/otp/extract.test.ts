@@ -67,6 +67,26 @@ describe("extractOtpCandidates / extractBestOtp", () => {
     assert.equal(extractBestOtp("Your order number is 123456789012."), null);
   });
 
+  it("does not slice digits out of a hex app id in a GitHub OAuth notice", () => {
+    // Regression: "2230" was extracted from applications/6efe458dfe2230acceea
+    // via the separated_digits pass (no word boundary inside hex tokens).
+    const body = [
+      "Hey priority3!",
+      "",
+      "A third-party OAuth application (LeetCode) with user:email scopes was recently authorized to access your account.",
+      "Visit https://github.com/settings/connections/applications/6efe458dfe2230acceea for more information.",
+      "",
+      "To see this and other security events for your account, visit https://github.com/settings/security-log",
+      "",
+      "If you run into problems, please contact support by visiting https://github.com/contact",
+      "",
+      "Thanks,",
+      "The GitHub Team",
+    ].join("\n");
+    assert.equal(extractBestOtp(body), null);
+    assert.ok(!extractOtpCandidates(body).some((c) => c.code === "2230"));
+  });
+
   it("returns null when nothing code-shaped exists", () => {
     assert.equal(extractBestOtp("Hello, thanks for reaching out!"), null);
   });
