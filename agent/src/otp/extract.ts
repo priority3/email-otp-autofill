@@ -29,6 +29,15 @@ const KEYWORD_SOURCES = [
   "\\bsecurity code\\b",
   "\\blogin code\\b",
   "single[\\s-]?use code",
+  // SaaS signup mails (Google-style / SpaceXAI / etc.) often say "use the code
+  // below to validate your email" rather than "verification code".
+  "validate your email",
+  "verify your email",
+  "confirm your email",
+  "use the code",
+  "enter the code",
+  "code below",
+  "following code",
 ];
 const KEYWORDS = KEYWORD_SOURCES.map((s) => new RegExp(s, "i"));
 const KEYWORD_ALT = KEYWORD_SOURCES.join("|");
@@ -156,6 +165,19 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
     if (isNumericFragment(text, m.index, m[0]!)) continue;
     const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
     push(m[1]!, 2, "plain_digits", keywordBoost(ctx));
+  }
+
+  // Standalone-line mixed codes (e.g. "54R-RN5" alone under "use the code
+  // below to validate your email address"). The near-keyword gap is too tight
+  // for the intervening sentence, so only run this when the body already smells
+  // like an OTP email. isCodeShape still requires both letters and digits, so
+  // letter-only tokens like brand names on their own line are ignored.
+  if (KEYWORDS.some((re) => re.test(text))) {
+    const standaloneLine =
+      /(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9-]{2,18}[A-Za-z0-9])\s*(?=\n|$)/g;
+    while ((m = standaloneLine.exec(text))) {
+      push(m[1]!, 11, "standalone_line_alnum", 3, true);
+    }
   }
 
   // De-dupe: keep best score per code.

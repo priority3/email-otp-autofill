@@ -101,6 +101,28 @@ describe("extractOtpCandidates / extractBestOtp", () => {
     const body = "工单编号 8842。您的验证码是 337201。";
     assert.equal(extractBestOtp(body)?.code, "337201");
   });
+
+  it("extracts hyphenated alnum codes on their own line (Google/SaaS style)", () => {
+    // Regression: "use the code below to validate your email" + standalone
+    // "54R-RN5" was not recognized — no "verification code" keyword, and the
+    // near-keyword gap cannot bridge the intervening sentence.
+    const body = [
+      "Validate your email",
+      "Hi,",
+      "",
+      "Thank you for creating a SpaceXAI account. Please use the code below to validate your email address.",
+      "",
+      "54R-RN5",
+      "If you did not create a new account, please ignore this email.",
+      "",
+      "SpaceXAI Team",
+      "© 2026 X.AI LLC",
+      "For questions contact support@x.ai",
+    ].join("\n");
+    const best = extractBestOtp(body);
+    assert.equal(best?.code, "54RRN5");
+    assert.ok((best?.score ?? 0) > 2); // must beat a weak © 2026 year candidate
+  });
 });
 
 describe("extractTtlSec", () => {
