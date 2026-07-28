@@ -87,6 +87,37 @@ describe("extractOtpCandidates / extractBestOtp", () => {
     assert.ok(!extractOtpCandidates(body).some((c) => c.code === "2230"));
   });
 
+  it("does not treat a ZIP / street number in a Google sign-in notice as a code", () => {
+    // Regression: this mail carries no OTP at all, yet "Mountain View, CA 94043"
+    // yielded 94043 (separated_digits) and "1600 Amphitheatre" yielded 1600.
+    // "安全提醒" / "安全技术" must not count as a code cue either.
+    const body = [
+      "掌控您的 Google 账号数据",
+      "you@example.com",
+      "",
+      "我们向您发送这封邮件，是因为您于 7月28日20:41 使用 Google 账号登录了“proxy001.com”。",
+      "这封邮件总结了您共享的信息。目前，您无需采取任何措施。",
+      "",
+      "“proxy001.com”收到了以下个人资料信息",
+      "Example User",
+      "姓名和个人资料照片",
+      "you@example.com",
+      "邮箱",
+      "",
+      "这封邮件涵盖您在 7月28日20:41 共享的信息",
+      "如果想停止使用 Google 账号登录“proxy001.com”，请前往您的 Google 账号。",
+      "查看“proxy001.com”的《隐私权政策》和《服务条款》，了解“proxy001.com”会如何处理及保护您的数据。",
+      "",
+      "使用 Google，安全加倍",
+      "为了确保您的数据安全，Google 账号采用了先进的安全技术来保护您的隐私",
+      "即使退订此类邮件，您仍会继续收到安全提醒。",
+      "",
+      "© 2026 Google LLC 1600 Amphitheatre Parkway, Mountain View, CA 94043",
+    ].join("\n");
+    assert.equal(extractBestOtp(body), null);
+    assert.deepEqual(extractOtpCandidates(body), []);
+  });
+
   it("returns null when nothing code-shaped exists", () => {
     assert.equal(extractBestOtp("Hello, thanks for reaching out!"), null);
   });
