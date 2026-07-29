@@ -51,7 +51,11 @@ const SOFT_CUE =
   /验证|驗證|校验|校驗|动态码|動態碼|口令|密[码碼]|安全[码碼]|代[码碼]|\bcodes?\b|\bpasscode\b|\bPIN\b|\bOTP\b|\bverif|\bauthenticat/i;
 const CONNECTOR_WORDS = String.raw`(?:is|as|was|are|your|the|this|for)`;
 const KEYWORD_CODE_GAP = String.raw`(?:[^A-Za-z0-9]{0,24}(?:\b${CONNECTOR_WORDS}\b[^A-Za-z0-9]{0,24}){0,4})`;
-const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|[\s-](?=[A-Za-z0-9])){2,18}[A-Za-z0-9])`;
+// Only "-" may join code groups, never a space. Reason: a space-joined pattern
+// welds an ordinary word to an adjacent number — "email otp autofill" + "85% off"
+// became the code "autofill85". Space-separated *digit* groups ("123 456") are
+// still handled by the separated_digits pass.
+const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){2,18}[A-Za-z0-9])`;
 
 function normalize(s: string): string {
   return s
@@ -59,6 +63,24 @@ function normalize(s: string): string {
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+// Drop URLs before scanning for codes. Reason: marketing/tracking links are
+// dense with code-shaped tokens \u2014 SendGrid click URLs percent-encode "/" and
+// "+" as "-2F"/"-2B", producing runs like "-2BvlfpaVWO", and query strings
+// carry "code=REMIND15V5". A real OTP is never inside a URL, but these tokens
+// sit close enough to a keyword to outscore everything else.
+function stripUrls(s: string): string {
+  return (
+    s
+      .replace(/\bhttps?:\/\/\S+/gi, " ")
+      .replace(/\bwww\.[^\s<>"]+/gi, " ")
+      // Tracking URLs frequently carry an unencoded space in a query value (a
+      // brand name), so the patterns above stop at that space and leave a tail
+      // like "autofill&code=REMIND15V5&utm_medium=email&utm_content=...-20260706-...".
+      // Sweep up any run that still shows "&key=value" query syntax.
+      .replace(/\S*(?:&[A-Za-z_][\w.-]*=[^\s&]*)+/g, " ")
+  );
 }
 
 function keywordBoost(context: string): number {
@@ -109,7 +131,7 @@ function isCodeShape(code: string, allowAlnum: boolean): boolean {
 }
 
 export function extractOtpCandidates(raw: string): OtpCandidate[] {
-  const text = normalize(raw);
+  const text = stripUrls(normalize(raw));
   const candidates: OtpCandidate[] = [];
 
   // Build a candidate, applying the year rule consistently. A year-shaped
@@ -195,6 +217,12 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
     const standaloneLine =
       /(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9-]{2,18}[A-Za-z0-9])\s*(?=\n|$)/g;
     while ((m = standaloneLine.exec(text))) {
+      // Mixed letters+digits only. Reason: HTML-to-text turns footers into
+      // standalone lines ("Copyright⏎2026⏎Design.com"), and a bare number on
+      // its own line is not evidence of a code. Digit-only lines are still
+      // covered by the plain/separated passes, which score them on context.
+      const code = normalizeCandidate(m[1]!);
+      if (!/[A-Za-z]/.test(code) || !/\d/.test(code)) continue;
       push(m[1]!, 11, "standalone_line_alnum", 3, true);
     }
   }
