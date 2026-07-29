@@ -118,6 +118,61 @@ describe("extractOtpCandidates / extractBestOtp", () => {
     assert.deepEqual(extractOtpCandidates(body), []);
   });
 
+  it("does not mine codes out of marketing tracking URLs", () => {
+    // Regression: 15 of 24 real Design.com mails yielded a bogus code. Their
+    // subject carries the project's own name ("email otp autofill"), so \bOTP\b
+    // matches and every keyword-adjacent pass starts hunting. SendGrid click
+    // URLs percent-encode "/" and "+" as "-2F"/"-2B", so the query string is
+    // full of code-shaped runs.
+    const body = [
+      "Lettermark logos for email otp autofill",
+      "Grab 85% off your logo today.",
+      "View it here ( https://ablink.hello.design.com/ls/click?upn=zdkPX-2B-2FABXKZn-2FujNF3oWANujOB6uO5-2BvlfpaVWO )",
+      "Copyright",
+      "2026",
+      "Design.com.",
+    ].join("\n");
+    assert.equal(extractBestOtp(body), null);
+    const codes = extractOtpCandidates(body).map((c) => c.code);
+    assert.ok(!codes.includes("2BvlfpaVWO"), `leaked tracking token: ${codes.join()}`);
+    assert.ok(!codes.includes("2026"), `leaked footer year: ${codes.join()}`);
+  });
+
+  it("does not mine codes out of a query-string tail left by an unencoded space", () => {
+    // Regression: the brand name sits unencoded inside a query value, so URL
+    // matching stops at that space and leaves "autofill&code=...&utm_content=
+    // ...-20260706-..." in the text. "5666" (from &ckey=5666eced-…) scored 13
+    // via near_keyword, outranking everything.
+    const body = [
+      "Create a website for email otp autofill",
+      "Browse beautiful websites here",
+      "( https://ablink.hello.design.com/ls/click?upn=PQPZVfg-2BLjdk otp autofill&ckey=5666eced-aaec-433c-abc8-a600030a7206&code=WEBMA&utm_medium=email&utm_content=related-1-20260621-variation )",
+    ].join("\n");
+    assert.equal(extractBestOtp(body), null);
+  });
+
+  it("does not weld an ordinary word to an adjacent number", () => {
+    // Regression: "email otp autofill" + "85% off" produced the code
+    // "autofill85" (score 16) because the alnum pattern joined groups across a
+    // space. Only "-" may join groups now.
+    const body = "Minimalist logos for email otp autofill\n85% off your logo + our Minimalist logos.";
+    assert.equal(extractBestOtp(body), null);
+  });
+
+  it("still finds a real code in a mail that also has tracking links", () => {
+    // Guard for the fix above: stripping URLs must not swallow the real code.
+    const best = extractBestOtp(
+      "验证码：662218，10分钟内有效。\n退订 ( https://u1.ct.sendgrid.net/ls/click?upn=abc-2FnSh-2BvlfpaVWO )"
+    );
+    assert.equal(best?.code, "662218");
+  });
+
+  it("still finds a digits-only code alone on its own line", () => {
+    // Guard: the standalone-line pass now requires letters+digits, so a bare
+    // numeric code on its own line must still come through the plain pass.
+    assert.equal(extractBestOtp("您的验证码如下：\n\n889912\n\n5分钟内有效")?.code, "889912");
+  });
+
   it("returns null when nothing code-shaped exists", () => {
     assert.equal(extractBestOtp("Hello, thanks for reaching out!"), null);
   });
