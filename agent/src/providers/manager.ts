@@ -63,6 +63,10 @@ export class ProviderManager {
 
     // Gmail: prefer Pub/Sub push, fall back to polling.
     const gmailOAuth = this.gmailOAuth;
+    // Must be set before loadPubSubState/renewWatchIfNeeded: in Pub/Sub mode
+    // startPolling() never runs, but the watch registration needs the flag to
+    // decide whether to subscribe to the SPAM label.
+    gmailOAuth.setIncludeSpam(this.config.includeSpam);
     await gmailOAuth.loadPubSubState();
 
     if (this.config.gmail.pubsubEnabled && this.config.gmail.topicName) {
