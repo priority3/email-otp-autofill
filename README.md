@@ -2,17 +2,21 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Fetch email one-time passcodes (OTP) from QQ Mail / Outlook and autofill them
+Fetch email one-time passcodes (OTP) from QQ Mail / Outlook / Gmail and autofill them
 into the current page with a hotkey — via a local/self-hosted **agent** plus a
 Chrome (MV3) **extension**.
 
-> wip: Google, self-hosted, ...
+> wip: self-hosted, ...
 
 ## How it works
 
 The Chrome extension polls an **agent** service. The agent connects to your
 mailbox over IMAP / OAuth, extracts the latest verification code, and the
 extension fills it into the focused input when you press the hotkey.
+
+For Gmail, the agent supports **Google Cloud Pub/Sub push notifications** —
+when a new email arrives, Google pushes a notification to the agent in
+real-time, eliminating polling delays and reducing API quota usage.
 
 | Popup | Settings |
 | --- | --- |
@@ -35,8 +39,11 @@ Two ways to connect:
 
 ## Features
 
-- **Mailboxes**: QQ Mail (IMAP auth code) and Outlook (OAuth device-code flow).
-  Multiple accounts run in parallel.
+- **Mailboxes**: QQ Mail (IMAP auth code), Outlook (OAuth device-code flow), and
+  Gmail (OAuth authorization-code flow). Multiple accounts run in parallel.
+- **Gmail Pub/Sub push**: real-time OTP delivery via Google Cloud Pub/Sub —
+  zero polling delay, lower API quota usage. Falls back to polling if Pub/Sub
+  is not configured.
 - **OTP extraction**: keyword + scoring match for 4–8 digit codes (中/English
   keywords), with automatic validity-window detection (10s–24h).
 - **Hotkey autofill**: `⌘/Ctrl + Shift + .` finds the OTP input and fills it; a
@@ -52,9 +59,10 @@ Two ways to connect:
 
 ## Status
 
-Beyond MVP: QQ IMAP and Outlook OAuth (Graph device-code) are working;
-multi-tenant with SQLite-backed persistence and at-rest credential encryption;
-one-command Docker deploy.
+Beyond MVP: QQ IMAP, Outlook OAuth (Graph device-code), and Gmail OAuth are
+working; multi-tenant with SQLite-backed persistence and at-rest credential
+encryption; one-command Docker deploy. Gmail supports **Pub/Sub push
+notifications** for real-time OTP delivery.
 
 ## Load the extension
 
@@ -92,6 +100,25 @@ Click the extension icon → `Settings`. Confirm the `Agent` status at the top i
   "Allow public client flows" to Yes → copy the Application (client) ID and paste
   it in → `Save Client ID` → `Start login`, follow the device-code prompt to
   authorize in your browser → `Poll` to confirm the connection.
+- **Gmail (OAuth)**: in the
+  [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials)
+  create an OAuth 2.0 Client ID (type "Web application") → note the Client ID
+  and Client Secret → paste them in the extension's Gmail settings → `Start
+  Sign-in`, authorize in your browser → the connection is established
+  automatically.
+
+  **Optional: Pub/Sub push (recommended for production)** — for real-time OTP
+  delivery without polling:
+  1. In [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub),
+     create a topic (e.g. `gmail-notifications`) and a push subscription
+     pointing to `https://your.domain/v1/gmail/pubsub`.
+  2. In the subscription's push settings, set the **audience** to your agent's
+     pubsub endpoint URL.
+  3. In the agent's admin panel (`/admin`), set the Google OAuth credentials
+     and Pub/Sub audience, then configure the topic name in the user's Gmail
+     settings.
+  4. The agent will automatically register a Gmail watch (7-day expiration,
+     auto-renewed) and process incoming push notifications.
 
 > A saved auth code/password is masked with dots (••••) the next time you open
 > Settings; click the **eye** icon at the right of the field to reveal it.
@@ -177,7 +204,7 @@ Then set the extension's **Agent Base URL** to your public address.
 
 ## Secrets storage
 
-Email credentials (QQ auth code / Outlook OAuth tokens) are stored encrypted in
+Email credentials (QQ auth code / Outlook OAuth tokens / Gmail OAuth tokens) are stored encrypted in
 the SQLite DB under the `data/` volume using **AES-256-GCM**,
 with the key derived (scrypt) from `OTP_AGENT_MASTER_KEY`. The master key is
 only read from the environment and is never written to disk — a leaked database

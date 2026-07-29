@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-export type ProviderId = "qq" | "outlook";
+export type ProviderId = "qq" | "outlook" | "gmail";
 
 export type OtpItem = {
   id: string;

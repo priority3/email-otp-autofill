@@ -41,3 +41,36 @@ export function getOutlookClientId(): string {
 export function setOutlookClientId(clientId: string): void {
   setSetting(OUTLOOK_CLIENT_ID_KEY, clientId.trim());
 }
+
+const GOOGLE_CLIENT_ID_KEY = "google_client_id";
+const GOOGLE_CLIENT_SECRET_KEY = "google_client_secret";
+
+// Instance-wide Google OAuth client ID and secret. Unlike Microsoft's public
+// client flow, Google's device code flow requires both a client ID and secret.
+export function getGoogleClientId(): string {
+  return getSetting(GOOGLE_CLIENT_ID_KEY, "").trim();
+}
+
+export function setGoogleClientId(clientId: string): void {
+  setSetting(GOOGLE_CLIENT_ID_KEY, clientId.trim());
+}
+
+export function getGoogleClientSecret(): string {
+  return getSetting(GOOGLE_CLIENT_SECRET_KEY, "").trim();
+}
+
+export function setGoogleClientSecret(clientSecret: string): void {
+  setSetting(GOOGLE_CLIENT_SECRET_KEY, clientSecret.trim());
+}
+
+const PUBSUB_AUDIENCE_KEY = "pubsub_audience";
+
+// Expected audience claim for Google Pub/Sub Push OIDC tokens.
+// Typically your agent's public URL, e.g. "https://your-agent.example.com/v1/gmail/pubsub"
+export function getPubSubAudience(): string {
+  return getSetting(PUBSUB_AUDIENCE_KEY, "").trim();
+}
+
+export function setPubSubAudience(audience: string): void {
+  setSetting(PUBSUB_AUDIENCE_KEY, audience.trim());
+}

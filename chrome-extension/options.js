@@ -187,6 +187,11 @@ function selectAccount(acc) {
     $("acctTitle").querySelector("span:last-child").textContent = acc.email || "Outlook OAuth";
     renderAccountFormByType("outlook_oauth");
     showPanel("panelAccount");
+  } else if (acc.type === "gmail_oauth") {
+    // Gmail OAuth: show the OAuth panel with connect/clear actions
+    $("acctTitle").querySelector("span:last-child").textContent = acc.email || "Gmail OAuth";
+    renderAccountFormByType("gmail_oauth");
+    showPanel("panelAccount");
   } else {
     // QQ account: show the edit form
     $("acctTitle").querySelector("span:last-child").textContent = acc.email;
@@ -207,19 +212,26 @@ function setText(id, text) {
   if (el && text != null) el.textContent = text;
 }
 
-// Toggle form fields for QQ vs Outlook OAuth.
+// Toggle form fields for QQ vs Outlook OAuth vs Gmail OAuth.
 async function renderAccountFormByType(type) {
   const isQq = type === "qq";
+  const isOutlook = type === "outlook_oauth";
+  const isGmail = type === "gmail_oauth";
   $("qqFields").hidden = !isQq;
-  $("outlookOauthFields").hidden = isQq;
-  // Keep acctActions visible for both types; hide Save for OAuth (it's a no-op).
+  $("outlookOauthFields").hidden = !isOutlook;
+  $("gmailOauthFields").hidden = !isGmail;
+  // Keep acctActions visible for all types; hide Save for OAuth types.
   $("acctActions").hidden = false;
   $("acctSave").hidden = !isQq;
   $("acctRemove").hidden = true; // only shown for existing QQ accounts via selectAccount
-  if (!isQq) {
+  if (isOutlook) {
     // Switch user to OAuth mode on the server, then refresh state.
     try { await bg({ type: "BG_OUTLOOK_CONFIG", payload: { mode: "oauth" } }); } catch { /* ignore */ }
     await refreshOutlookOAuthState();
+  }
+  if (isGmail) {
+    try { await bg({ type: "BG_GMAIL_CONFIG", payload: { mode: "oauth" } }); } catch { /* ignore */ }
+    await refreshGmailOAuthState();
   }
 }
 
@@ -228,6 +240,19 @@ function toggleOutlookActions(connected) {
   const con = $("outlookConnectedActions");
   // Reason: `.row { display:flex }` can override `[hidden]`, so we drive both
   // the attribute and inline display to keep the OAuth action groups in sync.
+  if (dis) {
+    dis.hidden = connected;
+    dis.style.display = connected ? "none" : "";
+  }
+  if (con) {
+    con.hidden = !connected;
+    con.style.display = connected ? "" : "none";
+  }
+}
+
+function toggleGmailActions(connected) {
+  const dis = $("gmailDisconnectedActions");
+  const con = $("gmailConnectedActions");
   if (dis) {
     dis.hidden = connected;
     dis.style.display = connected ? "none" : "";
@@ -247,6 +272,22 @@ async function refreshOutlookOAuthState() {
       setMsg("outlookState", T(connected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
       // Toggle action groups: Start/Clear when disconnected, Disconnect when connected.
       toggleOutlookActions(connected);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function refreshGmailOAuthState() {
+  try {
+    const r = await bg({ type: "BG_AGENT_STATUS" });
+    if (r && r.ok && r.status && r.status.config) {
+      const gm = r.status.config.gmail || {};
+      const connected = !!gm.oauthConnected;
+      setMsg("gmailState", T(connected ? "oauth_connected" : (gm.clientIdSet ? "oauth_not_connected" : "gmail_no_client_id")));
+      // Clear any stale "starting…" left over from a prior auth attempt.
+      setMsg("gmailDeviceCodeMsg", "");
+      toggleGmailActions(connected);
     }
   } catch {
     // ignore
@@ -529,11 +570,18 @@ async function refreshStatus() {
     if (ol.oauthConnected) {
       next.push({ type: "outlook_oauth", email: ol.oauthEmail || "Outlook OAuth", configured: !!ol.oauthConnected });
     }
+    // Gmail OAuth is a single account.
+    const gm = cfg.gmail || {};
+    if (gm.oauthConnected) {
+      next.push({ type: "gmail_oauth", email: gm.oauthEmail || "Gmail OAuth", configured: !!gm.oauthConnected });
+    }
     accounts = next;
     renderAccountList();
 
     // Sync Outlook OAuth action buttons with connection state.
     toggleOutlookActions(!!ol.oauthConnected);
+    // Sync Gmail OAuth action buttons with connection state.
+    toggleGmailActions(!!gm.oauthConnected);
   } catch (e) {
     setAgentStatus(false, String(e && e.message ? e.message : e));
     accounts = [];
@@ -744,6 +792,93 @@ function wireOauth() {
   });
 }
 
+// Poll the agent status until Gmail OAuth reports connected, or time out.
+// Used after opening the consent tab: the token lands on the agent via the
+// browser-redirect callback, so the options page has to watch for the result.
+async function pollGmailConnected(timeoutMs, intervalMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      const r = await bg({ type: "BG_AGENT_STATUS" });
+      if (r && r.ok && r.status && r.status.config && r.status.config.gmail && r.status.config.gmail.oauthConnected) {
+        return true;
+      }
+    } catch {
+      // agent momentarily unreachable — keep polling
+    }
+  }
+  return false;
+}
+
+function wireGmailOauth() {
+  $("gmailAuthStart").addEventListener("click", async () => {
+    setMsg("gmailDeviceCodeMsg", "");
+    setMsg("gmailOauthMsg", T("starting"));
+    $("gmailAuthStart").disabled = true;
+
+    try {
+      // Ask the agent for the Google consent URL (it mints the state + redirect_uri).
+      const r = await bg({ type: "BG_GMAIL_AUTH_URL" });
+      if (!r || !r.ok || !r.url) {
+        setMsg("gmailOauthMsg", T("failed_with", { err: r && r.error ? r.error : "" }));
+        $("gmailAuthStart").disabled = false;
+        return;
+      }
+
+      // Open Google's consent screen in a normal tab. After the user grants access,
+      // Google redirects the browser to the agent's callback, which stores the token.
+      window.open(r.url, "_blank");
+      setMsg("gmailOauthMsg", T("oauth_waiting_browser"));
+
+      const connected = await pollGmailConnected(120000, 2000);
+      if (connected) {
+        setMsg("gmailOauthMsg", T("connected"));
+        toggleGmailActions(true);
+        await refreshStatus();
+        await refreshGmailOAuthState();
+        setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+      } else {
+        setMsg("gmailOauthMsg", T("gmail_auth_timeout"));
+      }
+    } catch (e) {
+      setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+
+    $("gmailAuthStart").disabled = false;
+  });
+
+  $("gmailClear").addEventListener("click", async () => {
+    setMsg("gmailOauthMsg", T("clearing"));
+    try {
+      const r = await bg({ type: "BG_GMAIL_CLEAR" });
+      setMsg("gmailOauthMsg", r && r.ok ? T("cleared") : T("failed"));
+      await refreshStatus();
+      if (r && r.ok) {
+        selected = null;
+        setNavActive(null);
+        showPanel("panelEmpty");
+      }
+    } catch (e) {
+      setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+    setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+  });
+
+  $("gmailDisconnect").addEventListener("click", async () => {
+    setMsg("gmailOauthMsg", T("clearing"));
+    try {
+      const r = await bg({ type: "BG_GMAIL_CLEAR" });
+      setMsg("gmailOauthMsg", r && r.ok ? T("cleared") : T("failed"));
+      await refreshStatus();
+      await refreshGmailOAuthState();
+    } catch (e) {
+      setMsg("gmailOauthMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+    }
+    setTimeout(() => setMsg("gmailOauthMsg", ""), 2500);
+  });
+}
+
 // ---- boot ----------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", async () => {
   LANG = await getUiLang();
@@ -788,6 +923,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   wireOauth();
+  wireGmailOauth();
   initPwdToggles();
 
   // Note: the default detail panel is selected inside refreshStatus() only after
