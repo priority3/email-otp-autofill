@@ -13,6 +13,7 @@ export type OtpItem = {
   from?: string;
   subject?: string;
   messageId?: string;
+  folder?: string;
   consumedAt?: number;
 };
 
@@ -112,4 +113,3 @@ export class OtpStore {
     return this.validList(q)[0] ?? null;
   }
 }
-

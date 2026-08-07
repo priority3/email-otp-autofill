@@ -29,12 +29,33 @@ const KEYWORD_SOURCES = [
   "\\bsecurity code\\b",
   "\\blogin code\\b",
   "single[\\s-]?use code",
+  // SaaS signup mails (Google-style / SpaceXAI / etc.) often say "use the code
+  // below to validate your email" rather than "verification code".
+  "validate your email",
+  "verify your email",
+  "confirm your email",
+  "use the code",
+  "enter the code",
+  "code below",
+  "following code",
 ];
 const KEYWORDS = KEYWORD_SOURCES.map((s) => new RegExp(s, "i"));
 const KEYWORD_ALT = KEYWORD_SOURCES.join("|");
+
+// A much weaker signal than KEYWORD_SOURCES: it only says the mail talks about
+// a code / verification *at all*, without implying a code sits nearby. Used
+// solely to gate the low-confidence digit passes — never to score a candidate.
+// Deliberately narrow on the Chinese side: "安全" alone is far too common in
+// notification mails ("安全提醒", "安全技术"), so a 码/碼 must follow it.
+const SOFT_CUE =
+  /验证|驗證|校验|校驗|动态码|動態碼|口令|密[码碼]|安全[码碼]|代[码碼]|\bcodes?\b|\bpasscode\b|\bPIN\b|\bOTP\b|\bverif|\bauthenticat/i;
 const CONNECTOR_WORDS = String.raw`(?:is|as|was|are|your|the|this|for)`;
 const KEYWORD_CODE_GAP = String.raw`(?:[^A-Za-z0-9]{0,24}(?:\b${CONNECTOR_WORDS}\b[^A-Za-z0-9]{0,24}){0,4})`;
-const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|[\s-](?=[A-Za-z0-9])){2,18}[A-Za-z0-9])`;
+// Only "-" may join code groups, never a space. Reason: a space-joined pattern
+// welds an ordinary word to an adjacent number — "email otp autofill" + "85% off"
+// became the code "autofill85". Space-separated *digit* groups ("123 456") are
+// still handled by the separated_digits pass.
+const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){2,18}[A-Za-z0-9])`;
 
 function normalize(s: string): string {
   return s
@@ -42,6 +63,24 @@ function normalize(s: string): string {
     .replace(/\r\n/g, "\n")
     .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+// Drop URLs before scanning for codes. Reason: marketing/tracking links are
+// dense with code-shaped tokens \u2014 SendGrid click URLs percent-encode "/" and
+// "+" as "-2F"/"-2B", producing runs like "-2BvlfpaVWO", and query strings
+// carry "code=REMIND15V5". A real OTP is never inside a URL, but these tokens
+// sit close enough to a keyword to outscore everything else.
+function stripUrls(s: string): string {
+  return (
+    s
+      .replace(/\bhttps?:\/\/\S+/gi, " ")
+      .replace(/\bwww\.[^\s<>"]+/gi, " ")
+      // Tracking URLs frequently carry an unencoded space in a query value (a
+      // brand name), so the patterns above stop at that space and leave a tail
+      // like "autofill&code=REMIND15V5&utm_medium=email&utm_content=...-20260706-...".
+      // Sweep up any run that still shows "&key=value" query syntax.
+      .replace(/\S*(?:&[A-Za-z_][\w.-]*=[^\s&]*)+/g, " ")
+  );
 }
 
 function keywordBoost(context: string): number {
@@ -92,7 +131,7 @@ function isCodeShape(code: string, allowAlnum: boolean): boolean {
 }
 
 export function extractOtpCandidates(raw: string): OtpCandidate[] {
-  const text = normalize(raw);
+  const text = stripUrls(normalize(raw));
   const candidates: OtpCandidate[] = [];
 
   // Build a candidate, applying the year rule consistently. A year-shaped
@@ -142,20 +181,50 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
   }
 
   const separatedDigits = /((?:\d[\s-]?){4,8})/g;
-  while ((m = separatedDigits.exec(text))) {
-    const joined = (m[1] || "").replace(/\D/g, "");
-    if (joined.length < 4 || joined.length > 8) continue;
-    if (isNumericFragment(text, m.index, m[0]!)) continue;
-    // Avoid promoting generic numbers too much.
-    const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
-    push(joined, 4, "separated_digits", keywordBoost(ctx));
+  const plain = /\b(\d{4,8})\b/g;
+
+  // Gate the two keyword-free passes on the mail being about a code at all.
+  // Reason: ordinary notification mails are full of code-shaped numbers — a ZIP
+  // code ("Mountain View, CA 94043"), a street number ("1600 Amphitheatre
+  // Parkway"), an order id. Without this gate a Google "you signed in to X with
+  // your Google account" notice returns 94043 as the OTP. Any mail that really
+  // carries a code mentions 验证码/code/OTP/… somewhere, so the gate costs us
+  // nothing on true positives.
+  const hasCodeContext = SOFT_CUE.test(text) || KEYWORDS.some((re) => re.test(text));
+  if (hasCodeContext) {
+    while ((m = separatedDigits.exec(text))) {
+      const joined = (m[1] || "").replace(/\D/g, "");
+      if (joined.length < 4 || joined.length > 8) continue;
+      if (isNumericFragment(text, m.index, m[0]!)) continue;
+      // Avoid promoting generic numbers too much.
+      const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
+      push(joined, 4, "separated_digits", keywordBoost(ctx));
+    }
+
+    while ((m = plain.exec(text))) {
+      if (isNumericFragment(text, m.index, m[0]!)) continue;
+      const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
+      push(m[1]!, 2, "plain_digits", keywordBoost(ctx));
+    }
   }
 
-  const plain = /\b(\d{4,8})\b/g;
-  while ((m = plain.exec(text))) {
-    if (isNumericFragment(text, m.index, m[0]!)) continue;
-    const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
-    push(m[1]!, 2, "plain_digits", keywordBoost(ctx));
+  // Standalone-line mixed codes (e.g. "54R-RN5" alone under "use the code
+  // below to validate your email address"). The near-keyword gap is too tight
+  // for the intervening sentence, so only run this when the body already smells
+  // like an OTP email. isCodeShape still requires both letters and digits, so
+  // letter-only tokens like brand names on their own line are ignored.
+  if (KEYWORDS.some((re) => re.test(text))) {
+    const standaloneLine =
+      /(?:^|\n)\s*([A-Za-z0-9][A-Za-z0-9-]{2,18}[A-Za-z0-9])\s*(?=\n|$)/g;
+    while ((m = standaloneLine.exec(text))) {
+      // Mixed letters+digits only. Reason: HTML-to-text turns footers into
+      // standalone lines ("Copyright⏎2026⏎Design.com"), and a bare number on
+      // its own line is not evidence of a code. Digit-only lines are still
+      // covered by the plain/separated passes, which score them on context.
+      const code = normalizeCandidate(m[1]!);
+      if (!/[A-Za-z]/.test(code) || !/\d/.test(code)) continue;
+      push(m[1]!, 11, "standalone_line_alnum", 3, true);
+    }
   }
 
   // De-dupe: keep best score per code.
