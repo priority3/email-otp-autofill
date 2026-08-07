@@ -1,6 +1,7 @@
 import { ImapOtpWatcher } from "./imap.js";
 import { OutlookOAuthProvider } from "./outlook-oauth.js";
 import { GmailOAuthProvider } from "./gmail-oauth.js";
+import { CfMailProvider } from "./cfmail.js";
 import type { OtpStore } from "../otp/store.js";
 import type { AppConfig } from "../storage/config.js";
 import { loadConfig, saveConfig } from "../storage/config.js";
@@ -18,6 +19,7 @@ export class ProviderManager {
   private qq = new Map<string, Watcher>();
   private outlookOAuth: OutlookOAuthProvider; // single-account per user
   private gmailOAuth: GmailOAuthProvider; // single-account per user
+  private cfmail: CfMailProvider; // multi-account per user
 
   constructor(store: OtpStore, config: AppConfig, userId: string = LOCAL_USER_ID) {
     this.store = store;
@@ -25,6 +27,7 @@ export class ProviderManager {
     this.config = config;
     this.outlookOAuth = new OutlookOAuthProvider(store, userId);
     this.gmailOAuth = new GmailOAuthProvider(store, userId);
+    this.cfmail = new CfMailProvider(store, userId);
   }
 
   private kcQq(email: string) {
@@ -43,6 +46,9 @@ export class ProviderManager {
   getGmailOAuth() {
     return this.gmailOAuth;
   }
+  getCfMail() {
+    return this.cfmail;
+  }
 
   async reloadConfig(): Promise<void> {
     this.config = await loadConfig(this.userId);
@@ -58,6 +64,7 @@ export class ProviderManager {
 
   async reconcile(): Promise<void> {
     await this.reconcileQq();
+    await this.reconcileCfmail();
     // OAuth pollers are cheap; they exit early if not connected.
     this.outlookOAuth.startPolling(this.config.pollIntervalMs, this.config.includeSpam);
 
@@ -95,6 +102,7 @@ export class ProviderManager {
     this.qq.clear();
     this.outlookOAuth.stop();
     this.gmailOAuth.stop();
+    this.cfmail.stop();
   }
 
   // Diff the configured QQ accounts against running watchers: stop removed ones,
@@ -167,9 +175,40 @@ export class ProviderManager {
     });
   }
 
+  // --- CF Temp Email account add/remove ---------------------------------
+  async addCfmailAccount(email: string, baseUrl: string): Promise<void> {
+    await this.updateConfig((c) => {
+      if (!c.cfmail.accounts.some((a) => a.email === email))
+        c.cfmail.accounts.push({ email, baseUrl });
+    });
+  }
+  async removeCfmailAccount(email: string): Promise<void> {
+    await this.cfmail.clearAuth(email);
+    await this.updateConfig((c) => {
+      c.cfmail.accounts = c.cfmail.accounts.filter((a) => a.email !== email);
+    });
+  }
+  async clearCfmail(): Promise<void> {
+    for (const { email } of this.config.cfmail.accounts) await this.cfmail.clearAuth(email);
+    await this.updateConfig((c) => {
+      c.cfmail.accounts = [];
+    });
+  }
+  private async reconcileCfmail(): Promise<void> {
+    this.cfmail.setAccounts(this.config.cfmail.accounts);
+    if (this.config.cfmail.accounts.length > 0) {
+      this.cfmail.startPolling(this.config.pollIntervalMs);
+    } else {
+      this.cfmail.stop();
+    }
+  }
+
   // Expose the scoped secret key for a kind+email so the HTTP layer can read it.
   secretKeyFor(kind: "qq", email: string): string {
     return this.kcQq(email);
+  }
+  secretKeyForCfmail(email: string, kind: "jwt" | "sitepwd"): string {
+    return this.cfmail.secretKeyFor(email, kind);
   }
 }
 

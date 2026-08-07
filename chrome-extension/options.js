@@ -61,7 +61,7 @@ function refreshPwdToggleLabels() {
 
 // ---- i18n ----------------------------------------------------------------
 function applyRichI18n() {
-  const map = { qqHowto: "qq_howto" };
+  const map = { qqHowto: "qq_howto", cfmailHowto: "cfmail_howto" };
   for (const id of Object.keys(map)) {
     const el = $(id);
     if (el) el.innerHTML = T(map[id]);
@@ -115,6 +115,8 @@ function accountKey(type, email) {
 
 // ---- account list (sidebar) ----------------------------------------------
 const TYPE_ICON = { qq: "📩", outlook_oauth: "🔑" };
+const CFMAIL_ICON = "☁️";
+const TYPE_ICON = { qq: "📩", outlook_oauth: "🔑", gmail_oauth: "✉️", cfmail: "☁️" };
 
 function renderAccountList() {
   const list = $("accountList");
@@ -171,6 +173,12 @@ function selectAdd() {
   $("acctEmail").disabled = false;
   $("acctSecret").value = "";
   $("acctRemove").hidden = true;
+  // Reset CF temp-mail fields for a clean add.
+  $("cfmailEmail").value = "";
+  $("cfmailEmail").disabled = false;
+  $("cfmailBaseUrl").value = "";
+  $("cfmailJwt").value = "";
+  $("cfmailSitePwd").value = "";
   setMsg("acctMsg", "");
   renderAccountFormByType("qq");
   showPanel("panelAccount");
@@ -192,6 +200,20 @@ function selectAccount(acc) {
     $("acctTitle").querySelector("span:last-child").textContent = acc.email || "Gmail OAuth";
     renderAccountFormByType("gmail_oauth");
     showPanel("panelAccount");
+  } else if (acc.type === "cfmail") {
+    // CF Temp Email: show the edit form with baseUrl + JWT + site password.
+    $("acctTitle").querySelector("span:last-child").textContent = acc.email;
+    $("cfmailEmail").value = acc.email;
+    $("cfmailEmail").disabled = true;
+    $("cfmailBaseUrl").value = acc.baseUrl || "";
+    $("cfmailJwt").value = "";
+    $("cfmailSitePwd").value = "";
+    $("acctRemove").hidden = false;
+    setMsg("acctMsg", "");
+    renderAccountFormByType("cfmail");
+    showPanel("panelAccount");
+    // Pre-fill the stored JWT (masked, revealable via the eye).
+    revealCfmailSecret(acc.email);
   } else {
     // QQ account: show the edit form
     $("acctTitle").querySelector("span:last-child").textContent = acc.email;
@@ -217,12 +239,14 @@ async function renderAccountFormByType(type) {
   const isQq = type === "qq";
   const isOutlook = type === "outlook_oauth";
   const isGmail = type === "gmail_oauth";
+  const isCfmail = type === "cfmail";
   $("qqFields").hidden = !isQq;
   $("outlookOauthFields").hidden = !isOutlook;
   $("gmailOauthFields").hidden = !isGmail;
+  $("cfmailFields").hidden = !isCfmail;
   // Keep acctActions visible for all types; hide Save for OAuth types.
   $("acctActions").hidden = false;
-  $("acctSave").hidden = !isQq;
+  $("acctSave").hidden = !isQq && !isCfmail;
   $("acctRemove").hidden = true; // only shown for existing QQ accounts via selectAccount
   if (isOutlook) {
     // Switch user to OAuth mode on the server, then refresh state.
@@ -575,6 +599,9 @@ async function refreshStatus() {
     if (gm.oauthConnected) {
       next.push({ type: "gmail_oauth", email: gm.oauthEmail || "Gmail OAuth", configured: !!gm.oauthConnected });
     }
+    // CF Temp Email: multi-account.
+    const cf = (cfg.cfmail && cfg.cfmail.accounts) || [];
+    for (const a of cf) next.push({ type: "cfmail", email: a.email, baseUrl: a.baseUrl, configured: !!a.configured });
     accounts = next;
     renderAccountList();
 
@@ -592,7 +619,9 @@ async function refreshStatus() {
 // ---- save / remove account -----------------------------------------------
 async function saveAccount() {
   const type = $("acctType").value;
-  if (type === "outlook_oauth") return; // OAuth has its own save button
+  if (type === "outlook_oauth" || type === "gmail_oauth") return; // OAuth has its own save button
+
+  if (type === "cfmail") return saveCfmail();
 
   const email = $("acctEmail").value.trim();
   const secret = $("acctSecret").value.trim();
@@ -632,7 +661,8 @@ function verifyErrorText(err) {
 async function removeAccount() {
   if (!selected || !selected.email) return;
   const { type, email } = selected;
-  if (type !== "qq") return; // Only QQ accounts can be removed this way
+  if (type === "cfmail") return removeCfmailAccount(email);
+  if (type !== "qq") return; // Only QQ + CF accounts can be removed this way
 
   setMsg("acctMsg", T("removing"));
   try {
@@ -648,6 +678,63 @@ async function removeAccount() {
     }
   } catch (e) {
     setMsg("acctMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+  }
+}
+
+// ---- CF Temp Email save / remove / reveal -------------------------------
+async function saveCfmail() {
+  const baseUrl = $("cfmailBaseUrl").value.trim().replace(/\/+$/, "");
+  const email = $("cfmailEmail").value.trim();
+  const jwt = $("cfmailJwt").value.trim();
+  const sitePassword = $("cfmailSitePwd").value.trim();
+  if (!baseUrl || !email || !jwt) {
+    setMsg("acctMsg", T("failed"));
+    return;
+  }
+  setMsg("acctMsg", T("verifying"));
+  $("acctSave").disabled = true;
+  try {
+    const r = await bg({ type: "BG_CFMAIL_CONFIG", email, baseUrl, jwt, sitePassword: sitePassword || undefined });
+    if (r && r.ok) {
+      setMsg("acctMsg", T("saved"));
+      await refreshStatus();
+      const savedEmail = (r.result && r.result.email) || email;
+      selectAccount({ type: "cfmail", email: savedEmail, baseUrl, configured: true });
+    } else {
+      setMsg("acctMsg", verifyErrorText(r && r.error));
+    }
+  } catch (e) {
+    setMsg("acctMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+  } finally {
+    $("acctSave").disabled = false;
+  }
+  setTimeout(() => setMsg("acctMsg", ""), 3500);
+}
+
+async function removeCfmailAccount(email) {
+  setMsg("acctMsg", T("removing"));
+  try {
+    const r = await bg({ type: "BG_CFMAIL_REMOVE", email });
+    if (r && r.ok) {
+      setMsg("acctMsg", T("cleared"));
+      await refreshStatus();
+      selected = null;
+      showPanel("panelEmpty");
+      setNavActive(null);
+    } else {
+      setMsg("acctMsg", T("failed"));
+    }
+  } catch (e) {
+    setMsg("acctMsg", T("failed_with", { err: String(e && e.message ? e.message : e) }));
+  }
+}
+
+async function revealCfmailSecret(email) {
+  try {
+    const r = await bg({ type: "BG_CFMAIL_REVEAL", email, kind: "jwt" });
+    if (r && r.ok && r.value) $("cfmailJwt").value = r.value;
+  } catch {
+    // agent down or no JWT — leave empty
   }
 }
 

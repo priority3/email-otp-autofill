@@ -14,7 +14,7 @@ const CLIENT_HEADER_VALUE = "email-otp-autofill";
 const DEFAULTS = {
   agentBaseUrl: "https://otp.razet.me",
   maxAgeSec: 120,
-  providers: ["qq", "outlook", "gmail"]
+  providers: ["qq", "outlook", "gmail", "cfmail"]
 };
 
 async function getSettings() {
@@ -356,6 +356,39 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         body: JSON.stringify({ baseUrl })
       });
       sendResponse({ ok: true, url: json.url });
+      return;
+    }
+
+    // --- CF Temp Email ---
+    if (msg.type === "BG_CFMAIL_CONFIG") {
+      const json = await agentFetch("/v1/cfmail/config", {
+        method: "POST",
+        body: JSON.stringify({
+          email: msg.email,
+          baseUrl: msg.baseUrl,
+          jwt: msg.jwt,
+          sitePassword: msg.sitePassword || undefined,
+        })
+      });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    if (msg.type === "BG_CFMAIL_REMOVE") {
+      const json = await agentFetch("/v1/cfmail/remove", {
+        method: "POST",
+        body: JSON.stringify({ email: msg.email })
+      });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    if (msg.type === "BG_CFMAIL_REVEAL") {
+      const json = await agentFetch("/v1/cfmail/reveal", {
+        method: "POST",
+        body: JSON.stringify({ email: msg.email, kind: msg.kind || "jwt" })
+      });
+      sendResponse({ ok: true, value: json.value });
       return;
     }
   })()

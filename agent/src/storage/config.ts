@@ -19,6 +19,38 @@ const ConfigSchema = z.object({
       accounts: z.array(AccountSchema).default(() => []),
     })
     .default(() => ({ accounts: [] })),
+  imap: z
+    .object({
+      // Multi-account generic IMAP. Each entry carries its own host/port/secure
+      // so users can connect any provider (CF Email Routing, Zoho, 163, etc.).
+      // The auth password lives in the secret store under `imap:${email}`.
+      accounts: z
+        .array(
+          z.object({
+            email: z.string().email(),
+            host: z.string().min(1),
+            port: z.number().int().min(1).max(65535).default(993),
+            secure: z.boolean().default(true),
+          })
+        )
+       .default(() => []),
+   })
+    .default(() => ({ accounts: [] })),
+  cfmail: z
+    .object({
+      // Multi-account Cloudflare Temp Email. Each entry stores the API base
+      // URL + Address JWT (copied from the CF temp-mail frontend UI). The JWT
+      // and optional site password live in the secret store.
+      accounts: z
+        .array(
+          z.object({
+            email: z.string().email(),
+            baseUrl: z.string().url(),
+          })
+        )
+        .default(() => []),
+    })
+    .default(() => ({ accounts: [] })),
   outlook: z
     .object({
       mode: z.literal("oauth").default("oauth"),
