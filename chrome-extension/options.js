@@ -114,8 +114,6 @@ function accountKey(type, email) {
 }
 
 // ---- account list (sidebar) ----------------------------------------------
-const TYPE_ICON = { qq: "📩", outlook_oauth: "🔑" };
-const CFMAIL_ICON = "☁️";
 const TYPE_ICON = { qq: "📩", outlook_oauth: "🔑", gmail_oauth: "✉️", cfmail: "☁️" };
 
 function renderAccountList() {
