@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Privacy Policy — Email OTP Autofill</title>
+    <style>
+      :root { color-scheme: light dark; --fg:#1a1c20; --muted:#5b6169; --bg:#fff; --line:#e3e6ea; --accent:#0b7a5a; --code:#f3f5f7; }
+      @media (prefers-color-scheme: dark) {
+        :root { --fg:#e6e8ea; --muted:#9aa2ab; --bg:#0f1115; --line:#262a31; --accent:#7cf2c9; --code:#171a20; }
+      }
+      * { box-sizing: border-box; }
+      body { margin:0; background:var(--bg); color:var(--fg);
+        font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 48px 20px 96px; }
+      h1 { font-size: 28px; margin: 0 0 4px; letter-spacing:-.01em; }
+      h2 { font-size: 20px; margin: 40px 0 12px; padding-top: 20px; border-top: 1px solid var(--line); }
+      h3 { font-size: 16px; margin: 24px 0 8px; }
+      p, li { color: var(--fg); }
+      .meta { color: var(--muted); font-size: 14px; margin: 0 0 28px; }
+      .nav { font-size: 14px; margin: 0 0 32px; padding: 12px 14px; background: var(--code); border-radius: 8px; }
+      .nav a { color: var(--accent); }
+      table { width:100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+      th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      code { background: var(--code); padding: 1.5px 5px; border-radius: 4px; font-size: 13.5px;
+        font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+      .callout { border-left: 3px solid var(--accent); padding: 10px 0 10px 16px; margin: 18px 0; color: var(--muted); }
+      .callout strong { color: var(--fg); }
+      hr.big { border:0; border-top:1px solid var(--line); margin: 64px 0 48px; }
+      a { color: var(--accent); }
+      ul { padding-left: 22px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- ================================ ENGLISH ================================ -->
+      <h1 id="en">Privacy Policy — Email OTP Autofill</h1>
+      <p class="meta">Last updated: 24 August 2026 · <a href="#zh">中文版本 ↓</a></p>
+
+      <div class="nav">
+        Email OTP Autofill is an open-source Chrome extension. Its full source code, including
+        everything described below, is public at
+        <a href="https://github.com/priority3/email-otp-autofill">github.com/priority3/email-otp-autofill</a>.
+        Every claim in this policy can be checked against that code.
+      </div>
+
+      <h2>1. What this extension does</h2>
+      <p>
+        Email OTP Autofill retrieves the one-time verification code (OTP) that has just arrived in
+        your own email inbox and fills it into the verification-code field of the page you are
+        signing in to. It does nothing else. There are no ads, no analytics, and no tracking of any
+        kind.
+      </p>
+      <p>The system has two parts:</p>
+      <ul>
+        <li><strong>The extension</strong>, running in your browser.</li>
+        <li>
+          <strong>The agent</strong>, a server that connects to your mailbox and extracts codes. You
+          choose which agent to use: the instance we host at <code>otp.razet.me</code>, or one you
+          run yourself from the open-source repository.
+        </li>
+      </ul>
+
+      <div class="callout">
+        <strong>If you self-host the agent, this policy's server sections do not apply to you.</strong>
+        Your mail credentials, your codes and your account never reach us — they stay on the machine
+        you control. We have no access to a self-hosted instance and receive nothing from it.
+      </div>
+
+      <h2>2. Data stored on your device</h2>
+      <p>
+        The extension keeps the following in <code>chrome.storage.local</code>. It stays on your
+        computer and is not synced to any Google account:
+      </p>
+      <table>
+        <tr><th>Item</th><th>Purpose</th></tr>
+        <tr><td>Agent address</td><td>Which agent to talk to</td></tr>
+        <tr><td>Maximum code age (10–600 s)</td><td>How old a code may be and still be offered</td></tr>
+        <tr><td>Interface language</td><td>Your UI language choice</td></tr>
+        <tr><td>Session token</td><td>Keeps you signed in to your agent account</td></tr>
+        <tr><td>"Last seen" timestamp</td><td>Clears the unread badge on the toolbar icon</td></tr>
+        <tr><td>Selected code id</td><td>Remembers which code the popup is showing</td></tr>
+        <tr><td>Microsoft device code</td><td>Short-lived, only during Outlook sign-in; deleted after use or on expiry</td></tr>
+      </table>
+
+      <h2>3. Data sent from the extension to the agent</h2>
+      <table>
+        <tr><th>Data</th><th>When</th><th>Why</th></tr>
+        <tr><td>Username and password</td><td>Registration and sign-in</td><td>To create and authenticate your agent account</td></tr>
+        <tr><td>Invite code</td><td>Registration, if the instance requires one</td><td>To limit who can register</td></tr>
+        <tr><td>Mailbox address</td><td>When you add a mailbox</td><td>So the agent knows which inbox to watch</td></tr>
+        <tr><td>QQ Mail authorization code, or an OAuth grant for Outlook / Gmail</td><td>When you connect a mailbox</td><td>To read verification-code emails</td></tr>
+        <tr><td>Session token</td><td>Every request</td><td>Authentication</td></tr>
+        <tr><td>Hostname of the active tab</td><td>When you open the popup or fill a code</td><td>To pick the code belonging to the site you are signing in to, when several are valid at once</td></tr>
+      </table>
+      <div class="callout">
+        The hostname is <strong>the host name only</strong> — never the full URL, never query strings,
+        never the page title, never page content. It is used in memory to rank candidate codes and is
+        then discarded. It is not written to any database and not written to any log.
+      </div>
+
+      <h2>4. Data stored by the hosted agent</h2>
+      <p>
+        The agent we host keeps a single SQLite database. It contains:
+      </p>
+      <table>
+        <tr><th>Stored</th><th>Form</th></tr>
+        <tr><td>Your username</td><td>Plain text</td></tr>
+        <tr><td>Your password</td><td><strong>Never stored.</strong> Only a scrypt hash with a per-user random salt, verified in constant time</td></tr>
+        <tr><td>Account creation time, last-seen time, invite code used, enabled/disabled flag</td><td>Plain text</td></tr>
+        <tr><td>QQ Mail authorization code</td><td>Encrypted (see below)</td></tr>
+        <tr><td>Microsoft and Google OAuth refresh tokens</td><td>Encrypted</td></tr>
+        <tr><td>The mailbox addresses you connected</td><td>Encrypted</td></tr>
+        <tr><td>Gmail push-notification state (history id, watch expiry, labels)</td><td>Encrypted</td></tr>
+        <tr><td>Your settings — which mailboxes are configured, whether to include the spam folder, poll interval</td><td>Plain text</td></tr>
+        <tr><td>Session tokens and their expiry</td><td>Plain text, expiring</td></tr>
+      </table>
+      <p>
+        Encrypted items use AES-256-GCM. Each secret gets its own random salt and initialisation
+        vector, and its key is derived with scrypt from a master key supplied through the
+        environment. That master key is never written to disk, so a copy of the database on its own
+        cannot be decrypted.
+      </p>
+
+      <h2>5. Data held only in memory</h2>
+      <p>
+        When a verification code arrives, the agent keeps the following <strong>in memory
+        only</strong>. None of it is written to disk, and all of it is lost when the service
+        restarts:
+      </p>
+      <ul>
+        <li>the verification code itself;</li>
+        <li>which provider and which mailbox received it;</li>
+        <li>the time it arrived and its stated validity window;</li>
+        <li>the sender address, subject line, message id and folder — used to match the code to the site you are signing in to.</li>
+      </ul>
+      <p>
+        At most 100 recent items are held at a time; older ones are dropped. Codes stop being served
+        once past their validity window, which is typically one to two minutes.
+      </p>
+
+      <h2>6. What we never collect</h2>
+      <ul>
+        <li>No analytics, telemetry, advertising or tracking identifiers — none, of any kind.</li>
+        <li>No browsing history and no list of pages you visit.</li>
+        <li>No page content, form values, keystrokes, clicks, or mouse movement.</li>
+        <li>No location data.</li>
+        <li>No email bodies are stored or logged. The agent extracts the code and discards the rest.</li>
+        <li>The agent performs no HTTP request logging. Note that the network infrastructure in front of it (reverse proxy, CDN) may record connection metadata such as IP addresses, as any web server does.</li>
+      </ul>
+
+      <h2>7. Third parties</h2>
+      <p>To read your mail, the agent talks to the mail provider you chose, and to no one else:</p>
+      <table>
+        <tr><th>Provider</th><th>Endpoints</th><th>Permission requested</th></tr>
+        <tr>
+          <td>Google (Gmail)</td>
+          <td><code>gmail.googleapis.com</code>, <code>oauth2.googleapis.com</code>, <code>accounts.google.com</code>; optionally Google Cloud Pub/Sub for push delivery</td>
+          <td><code>gmail.readonly</code></td>
+        </tr>
+        <tr>
+          <td>Microsoft (Outlook)</td>
+          <td><code>graph.microsoft.com</code>, <code>login.microsoftonline.com</code></td>
+          <td><code>Mail.Read</code>, <code>User.Read</code>, <code>offline_access</code></td>
+        </tr>
+        <tr>
+          <td>QQ Mail</td>
+          <td>IMAP, using the authorization code you generate in QQ Mail's own settings</td>
+          <td>IMAP mailbox access</td>
+        </tr>
+      </table>
+      <p>
+        We do not sell, rent, or transfer your data to anyone. We do not use it for advertising, for
+        building profiles, or for training machine-learning models.
+      </p>
+      <p>
+        Be aware that the mailbox permissions above are provider-level read permissions: technically
+        they allow reading your mailbox, because neither Google, Microsoft nor IMAP offers a
+        "verification codes only" permission. The agent uses that access solely to find verification
+        codes, and you can verify this in the source code and revoke the grant at any time from your
+        Google or Microsoft account settings.
+      </p>
+
+      <h3>Google API Services — Limited Use disclosure</h3>
+      <p>
+        Email OTP Autofill's use and transfer of information received from Google APIs adheres to the
+        <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+        including the Limited Use requirements. Specifically: data obtained through the Gmail API is
+        used only to provide the verification-code autofill feature you requested; it is never
+        transferred to third parties except as required to provide that feature or as required by
+        law; it is never used for advertising; and it is never read by humans except with your
+        explicit consent, for security purposes, to comply with applicable law, or where the data is
+        aggregated and anonymised.
+      </p>
+
+      <h2>8. Retention and deletion</h2>
+      <ul>
+        <li><strong>Verification codes</strong> — memory only, gone within minutes and on every restart.</li>
+        <li><strong>Mail credentials and tokens</strong> — kept until you disconnect the mailbox or delete your account. Disconnecting deletes them immediately.</li>
+        <li><strong>Account record</strong> — kept until you ask for deletion.</li>
+        <li><strong>Session tokens</strong> — deleted at sign-out and on expiry.</li>
+      </ul>
+      <p>
+        To delete everything: disconnect each mailbox in Settings, then request account deletion
+        through the contact channel in section 11. You can also revoke the agent's access at any
+        moment from your
+        <a href="https://myaccount.google.com/permissions">Google account permissions</a> or
+        <a href="https://account.live.com/consent/Manage">Microsoft account permissions</a>, without
+        involving us at all.
+      </p>
+      <p>
+        If you prefer to keep nothing with us whatsoever, self-host the agent. That path is supported
+        as a first-class option, not an afterthought.
+      </p>
+
+      <h2>9. Security</h2>
+      <ul>
+        <li>All traffic between the extension and the hosted agent uses HTTPS.</li>
+        <li>Passwords are stored as salted scrypt hashes and verified in constant time.</li>
+        <li>Mail credentials and OAuth tokens are encrypted at rest with AES-256-GCM under a key that is never written to disk.</li>
+        <li>Each user's data is scoped to their own user id; one account cannot read another's codes or configuration.</li>
+      </ul>
+      <p>
+        No system is perfectly secure. If you find a vulnerability, please report it through the
+        contact channel below rather than disclosing it publicly.
+      </p>
+
+      <h2>10. Paid features (planned)</h2>
+      <p>
+        Paid features are being considered but are <strong>not implemented today</strong>. No payment
+        information of any kind is currently collected, transmitted, or stored.
+      </p>
+      <p>When they ship, the intended design is:</p>
+      <ul>
+        <li>Payment will be handled entirely by an established third-party payment processor, on their own pages.</li>
+        <li>The extension and the agent will never receive, see, or store card numbers or bank details.</li>
+        <li>We would store only what is needed to know what you are entitled to: a plan tier, a subscription status and expiry, and an opaque customer identifier issued by the processor.</li>
+        <li>The processor's own privacy policy would govern the payment data it holds.</li>
+      </ul>
+      <p>
+        This policy and the Chrome Web Store data disclosures will be updated <em>before</em> any paid
+        feature is released, not after.
+      </p>
+
+      <h2>11. Changes and contact</h2>
+      <p>
+        Material changes to this policy will be reflected in the "last updated" date above and in the
+        repository's commit history, which is public and auditable.
+      </p>
+      <p>
+        Questions, data-deletion requests, and security reports all go through the
+        project's public issue tracker:
+        <a href="https://github.com/priority3/email-otp-autofill/issues">github.com/priority3/email-otp-autofill/issues</a>.
+        We aim to respond to data-deletion requests within 30 days.
+      </p>
+
+      <hr class="big" />
+
+      <!-- ================================ 中文 ================================ -->
+      <h1 id="zh">隐私权政策 — Email OTP Autofill</h1>
+      <p class="meta">最后更新：2026 年 8 月 24 日 · <a href="#en">↑ English version</a></p>
+
+      <div class="nav">
+        Email OTP Autofill 是开源 Chrome 扩展，包括下文描述的全部行为在内，源代码公开于
+        <a href="https://github.com/priority3/email-otp-autofill">github.com/priority3/email-otp-autofill</a>。
+        本政策的每一条陈述都可以对照代码核实。
+      </div>
+
+      <h2>1. 这个扩展做什么</h2>
+      <p>
+        Email OTP Autofill 把刚刚发到你自己邮箱的一次性验证码（OTP）取出来，填进你正在登录的那个页面的验证码输入框。
+        它不做别的事。没有广告，没有统计分析，没有任何形式的追踪。
+      </p>
+      <p>系统由两部分组成：</p>
+      <ul>
+        <li><strong>扩展</strong>，运行在你的浏览器里。</li>
+        <li>
+          <strong>agent</strong>，一个连接你邮箱、提取验证码的服务端。用哪个 agent 由你决定：我们托管的
+          <code>otp.razet.me</code>，或者你自己用开源仓库跑的实例。
+        </li>
+      </ul>
+
+      <div class="callout">
+        <strong>如果你自建 agent，本政策中所有关于服务端的章节都与你无关。</strong>
+        你的邮箱凭据、验证码和账号从不经过我们，全部留在你自己掌控的机器上。我们无法访问自建实例，也不会从中收到任何数据。
+      </div>
+
+      <h2>2. 存在你设备上的数据</h2>
+      <p>
+        扩展在 <code>chrome.storage.local</code> 中保存以下内容。它们留在你的电脑上，不会同步到任何 Google 账号：
+      </p>
+      <table>
+        <tr><th>项目</th><th>用途</th></tr>
+        <tr><td>agent 地址</td><td>决定连接哪个 agent</td></tr>
+        <tr><td>验证码最大有效期（10–600 秒）</td><td>多旧的验证码仍然可用</td></tr>
+        <tr><td>界面语言</td><td>你选择的界面语言</td></tr>
+        <tr><td>会话令牌</td><td>维持你在 agent 上的登录状态</td></tr>
+        <tr><td>「最后查看」时间戳</td><td>用于清除工具栏图标上的未读角标</td></tr>
+        <tr><td>当前选中的验证码 id</td><td>记住弹窗正在显示哪一条</td></tr>
+        <tr><td>微软设备码</td><td>仅在 Outlook 登录过程中短暂存在，用完或过期即删除</td></tr>
+      </table>
+
+      <h2>3. 扩展发送给 agent 的数据</h2>
+      <table>
+        <tr><th>数据</th><th>时机</th><th>用途</th></tr>
+        <tr><td>用户名和密码</td><td>注册与登录</td><td>创建并验证你的 agent 账号</td></tr>
+        <tr><td>邀请码</td><td>注册时（如果该实例要求）</td><td>限制注册范围</td></tr>
+        <tr><td>邮箱地址</td><td>添加邮箱时</td><td>让 agent 知道该监听哪个信箱</td></tr>
+        <tr><td>QQ 邮箱授权码，或 Outlook / Gmail 的 OAuth 授权</td><td>连接邮箱时</td><td>读取含验证码的邮件</td></tr>
+        <tr><td>会话令牌</td><td>每次请求</td><td>身份验证</td></tr>
+        <tr><td>当前标签页的主机名</td><td>打开弹窗或填充验证码时</td><td>当同时有多条有效验证码时，挑出属于你正在登录的那个站点的那一条</td></tr>
+      </table>
+      <div class="callout">
+        这里传的<strong>只有主机名</strong>——不是完整 URL，不含查询参数，不含页面标题，不含页面内容。
+        它只在内存中用于给候选验证码打分，用完即弃，不写入任何数据库，也不写入任何日志。
+      </div>
+
+      <h2>4. 托管版 agent 存储的数据</h2>
+      <p>我们托管的 agent 只维护一个 SQLite 数据库，内容如下：</p>
+      <table>
+        <tr><th>存储内容</th><th>形式</th></tr>
+        <tr><td>你的用户名</td><td>明文</td></tr>
+        <tr><td>你的密码</td><td><strong>从不存储。</strong>只存 scrypt 哈希，每个用户独立随机盐，恒定时间比对</td></tr>
+        <tr><td>账号创建时间、最后活跃时间、所用邀请码、启用/停用标记</td><td>明文</td></tr>
+        <tr><td>QQ 邮箱授权码</td><td>加密（见下）</td></tr>
+        <tr><td>微软与 Google 的 OAuth refresh token</td><td>加密</td></tr>
+        <tr><td>你连接的邮箱地址</td><td>加密</td></tr>
+        <tr><td>Gmail 推送状态（history id、watch 过期时间、标签）</td><td>加密</td></tr>
+        <tr><td>你的设置——配置了哪些邮箱、是否包含垃圾邮件目录、轮询间隔</td><td>明文</td></tr>
+        <tr><td>会话令牌及其过期时间</td><td>明文，会过期</td></tr>
+      </table>
+      <p>
+        加密项使用 AES-256-GCM。每条密文有独立的随机盐和初始化向量，密钥由环境变量提供的主密钥经 scrypt 派生。
+        主密钥从不落盘，因此单独拿到数据库文件也无法解密。
+      </p>
+
+      <h2>5. 仅存在于内存中的数据</h2>
+      <p>验证码到达时，agent <strong>只在内存中</strong>保存以下内容。它们不写入磁盘，服务重启即全部丢失：</p>
+      <ul>
+        <li>验证码本身；</li>
+        <li>来自哪个服务商、哪个邮箱；</li>
+        <li>到达时间及其声明的有效期；</li>
+        <li>发件人地址、邮件主题、message id 和所在目录——用于把验证码匹配到你正在登录的站点。</li>
+      </ul>
+      <p>同时最多保留 100 条，超出即丢弃。超过有效期（通常 1 到 2 分钟）后不再对外提供。</p>
+
+      <h2>6. 我们从不收集的内容</h2>
+      <ul>
+        <li>没有统计分析、遥测、广告或追踪标识符——任何形式都没有。</li>
+        <li>不收集浏览历史，不记录你访问过哪些页面。</li>
+        <li>不收集页面内容、表单值、按键、点击或鼠标轨迹。</li>
+        <li>不收集位置数据。</li>
+        <li>不存储也不记录邮件正文。agent 提取出验证码后即丢弃其余内容。</li>
+        <li>agent 本身不做任何 HTTP 请求日志。但需说明：位于它前面的网络设施（反向代理、CDN）可能像任何 Web 服务器一样记录 IP 等连接元数据。</li>
+      </ul>
+
+      <h2>7. 第三方</h2>
+      <p>为了读取邮件，agent 只与你选择的邮件服务商通信，不与其他任何方通信：</p>
+      <table>
+        <tr><th>服务商</th><th>端点</th><th>申请的权限</th></tr>
+        <tr>
+          <td>Google（Gmail）</td>
+          <td><code>gmail.googleapis.com</code>、<code>oauth2.googleapis.com</code>、<code>accounts.google.com</code>；推送模式下可选 Google Cloud Pub/Sub</td>
+          <td><code>gmail.readonly</code></td>
+        </tr>
+        <tr>
+          <td>Microsoft（Outlook）</td>
+          <td><code>graph.microsoft.com</code>、<code>login.microsoftonline.com</code></td>
+          <td><code>Mail.Read</code>、<code>User.Read</code>、<code>offline_access</code></td>
+        </tr>
+        <tr>
+          <td>QQ 邮箱</td>
+          <td>IMAP，使用你在 QQ 邮箱自身设置中生成的授权码</td>
+          <td>IMAP 邮箱访问</td>
+        </tr>
+      </table>
+      <p>我们不出售、不出租、不向任何人转让你的数据。不用于广告，不用于构建用户画像，不用于训练机器学习模型。</p>
+      <p>
+        需要如实说明：上述邮箱权限是服务商层面的读取权限，技术上允许读取你的邮箱——因为 Google、Microsoft 和 IMAP
+        都没有提供「仅验证码」这种粒度的权限。agent 仅将该权限用于查找验证码，这一点你可以在源代码中核实，
+        也可以随时在 Google 或 Microsoft 账号设置中撤销授权。
+      </p>
+
+      <h3>Google API 服务 — 有限使用（Limited Use）声明</h3>
+      <p>
+        Email OTP Autofill 对从 Google API 获得的信息的使用和转移，遵守
+        <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API 服务用户数据政策</a>，
+        包括其中的有限使用要求。具体而言：通过 Gmail API 获取的数据仅用于提供你所请求的验证码自动填充功能；
+        除为提供该功能所必需或法律要求外，绝不转移给第三方；绝不用于广告；除非获得你的明确同意、出于安全目的、
+        为遵守适用法律，或数据已经过聚合与匿名化处理，绝不由人工读取。
+      </p>
+
+      <h2>8. 保留与删除</h2>
+      <ul>
+        <li><strong>验证码</strong> —— 仅在内存中，数分钟内消失，每次重启即清空。</li>
+        <li><strong>邮箱凭据与令牌</strong> —— 保留至你断开该邮箱或删除账号为止。断开连接会立即删除。</li>
+        <li><strong>账号记录</strong> —— 保留至你要求删除为止。</li>
+        <li><strong>会话令牌</strong> —— 退出登录时删除，过期后失效。</li>
+      </ul>
+      <p>
+        完全删除的做法：在设置中逐个断开邮箱连接，然后通过第 11 节的联系方式申请删除账号。你也可以完全绕开我们，
+        随时在
+        <a href="https://myaccount.google.com/permissions">Google 账号权限页</a> 或
+        <a href="https://account.live.com/consent/Manage">Microsoft 账号权限页</a> 撤销 agent 的访问权。
+      </p>
+      <p>如果你希望在我们这里不留下任何东西，请自建 agent。这是被当作一等选项支持的，不是附带功能。</p>
+
+      <h2>9. 安全</h2>
+      <ul>
+        <li>扩展与托管 agent 之间的全部流量走 HTTPS。</li>
+        <li>密码以加盐 scrypt 哈希存储，恒定时间比对。</li>
+        <li>邮箱凭据与 OAuth 令牌以 AES-256-GCM 静态加密，密钥从不落盘。</li>
+        <li>每个用户的数据按其 user id 隔离，一个账号无法读取另一个账号的验证码或配置。</li>
+      </ul>
+      <p>没有系统是绝对安全的。如果你发现漏洞，请通过下方联系方式报告，而不要公开披露。</p>
+
+      <h2>10. 付费功能（计划中）</h2>
+      <p>
+        付费功能在考虑中，但<strong>目前尚未实现</strong>。当前不收集、不传输、不存储任何形式的支付信息。
+      </p>
+      <p>上线时的预期设计是：</p>
+      <ul>
+        <li>支付全程由成熟的第三方支付服务商在其自有页面上处理。</li>
+        <li>扩展和 agent 永远不会接收、看到或存储卡号与银行信息。</li>
+        <li>我们只存储确定你权益所必需的内容：套餐档位、订阅状态与到期时间，以及支付服务商签发的不透明客户标识。</li>
+        <li>支付服务商所持有的支付数据，适用其自身的隐私政策。</li>
+      </ul>
+      <p>本政策与 Chrome 应用商店的数据披露，会在任何付费功能发布<em>之前</em>更新，而不是之后。</p>
+
+      <h2>11. 变更与联系方式</h2>
+      <p>本政策的实质性变更会体现在上方的「最后更新」日期，以及仓库的提交历史中——该历史是公开且可审计的。</p>
+      <p>
+        咨询、数据删除请求与安全报告，请统一通过项目的公开 issue 追踪器提交：
+        <a href="https://github.com/priority3/email-otp-autofill/issues">github.com/priority3/email-otp-autofill/issues</a>。
+        数据删除请求我们会在 30 天内回复。
+      </p>
+    </main>
+  </body>
+</html>
