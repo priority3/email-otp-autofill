@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 
-export type ProviderId = "qq" | "outlook" | "gmail";
+// "inbox" = the inbound webhook channel: the mail source pushes to us instead of
+// us polling it (Cloudflare Email Worker, self-hosted mail server pipe, …).
+export type ProviderId = "qq" | "outlook" | "gmail" | "inbox";
 
 export type OtpItem = {
   id: string;

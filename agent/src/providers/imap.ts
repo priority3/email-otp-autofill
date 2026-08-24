@@ -2,6 +2,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 import { extractBestOtp } from "../otp/extract.js";
+import { otpSourceText } from "../otp/html.js";
 import type { OtpStore, ProviderId } from "../otp/store.js";
 
 export type ImapAuth = {
@@ -95,12 +96,44 @@ export async function verifyImap(input: VerifyImapInput): Promise<VerifyImapResu
   return result;
 }
 
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/[ \t]+/g, " ");
+const JUNK_NAME_HINTS = [
+  "junk",
+  "spam",
+  "bulk",
+  "垃圾",
+  "垃圾邮件",
+  "垃圾郵件",
+  "垃圾箱",
+  "junk e-mail",
+  "junk email",
+];
+const JUNK_FALLBACK_FOLDERS = ["Junk", "Spam", "Bulk Mail", "Junk E-mail", "垃圾邮件"];
+
+function flattenMailboxes(entries: any[]): any[] {
+  const out: any[] = [];
+  for (const entry of entries) {
+    out.push(entry);
+    if (Array.isArray(entry?.children)) out.push(...flattenMailboxes(entry.children));
+  }
+  return out;
+}
+
+function folderPath(entry: any): string {
+  return String(entry?.path || entry?.name || "").trim();
+}
+
+function isLikelyJunkFolder(entry: any): boolean {
+  const flags = Array.isArray(entry?.specialUse)
+    ? entry.specialUse
+    : entry?.specialUse
+      ? [entry.specialUse]
+      : Array.isArray(entry?.flags)
+        ? entry.flags
+        : [];
+  if (flags.some((f: unknown) => String(f).toLowerCase() === "\\junk")) return true;
+
+  const name = `${entry?.name || ""} ${entry?.path || ""}`.toLowerCase();
+  return JUNK_NAME_HINTS.some((hint) => name.includes(hint.toLowerCase()));
 }
 
 const JUNK_NAME_HINTS = [
@@ -339,9 +372,11 @@ export class ImapOtpWatcher {
       if (!anyMsg.source) return;
 
       const parsed = await simpleParser(anyMsg.source as Buffer);
-      const text = parsed.text?.trim() || "";
-      const html = parsed.html ? stripHtml(String(parsed.html)) : "";
-      const raw = `${parsed.subject ?? ""}\n${text}\n${html}`;
+      const raw = otpSourceText({
+        subject: parsed.subject,
+        text: parsed.text?.trim() || "",
+        html: parsed.html ? String(parsed.html) : "",
+      });
       const best = extractBestOtp(raw);
       if (!best) return;
 

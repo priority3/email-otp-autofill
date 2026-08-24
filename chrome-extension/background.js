@@ -14,7 +14,9 @@ const CLIENT_HEADER_VALUE = "email-otp-autofill";
 const DEFAULTS = {
   agentBaseUrl: "https://otp.razet.me",
   maxAgeSec: 120,
-  providers: ["qq", "outlook", "gmail"]
+  // Keep in sync with ProviderId in agent/src/otp/store.ts — a provider missing
+  // from this list is filtered out of every /v1/otp/latest query.
+  providers: ["qq", "outlook", "gmail", "inbox"]
 };
 
 async function getSettings() {
@@ -275,6 +277,46 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const json = await agentFetch("/v1/qq/remove", {
         method: "POST",
         body: JSON.stringify({ email: msg.email })
+      });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    // --- inbound webhook channel ---
+    if (msg.type === "BG_INBOX_STATUS") {
+      try {
+        const json = await agentFetch("/v1/inbox/status", { method: "GET" });
+        sendResponse({ ok: true, inbox: json });
+      } catch (e) {
+        // An older agent has no such route — the caller hides the card instead
+        // of showing an error.
+        sendResponse({ ok: false, error: String(e && e.message ? e.message : e) });
+      }
+      return;
+    }
+
+    if (msg.type === "BG_INBOX_ROTATE") {
+      const json = await agentFetch("/v1/inbox/token/rotate", {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      sendResponse({ ok: true, ingestToken: json.ingestToken });
+      return;
+    }
+
+    if (msg.type === "BG_INBOX_CONFIG") {
+      const json = await agentFetch("/v1/inbox/config", {
+        method: "POST",
+        body: JSON.stringify(msg.payload || {})
+      });
+      sendResponse({ ok: true, result: json });
+      return;
+    }
+
+    if (msg.type === "BG_INBOX_DISABLE") {
+      const json = await agentFetch("/v1/inbox/disable", {
+        method: "POST",
+        body: JSON.stringify({})
       });
       sendResponse({ ok: true, result: json });
       return;

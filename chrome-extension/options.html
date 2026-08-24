@@ -72,6 +72,13 @@
             <span class="nav-label" data-i18n="agent_settings">Agent Settings</span>
           </button>
 
+          <!-- Inbound webhook: one per user, so it lives beside Agent rather
+               than in the account list. Hidden when the agent has no /v1/inbox. -->
+          <button id="navInbox" class="nav-item" type="button" hidden>
+            <span class="nav-ic">📥</span>
+            <span class="nav-label" data-i18n="inbox_nav">Webhook Inbox</span>
+          </button>
+
           <div class="sidebar-section-title" data-i18n="accounts">Accounts</div>
           <div id="accountList" class="account-list">
             <!-- account nav-items injected by options.js -->
@@ -114,6 +121,36 @@
             </div>
             <div class="row" style="margin-top:10px;">
               <button id="refreshStatus" data-i18n="refresh">Refresh</button>
+            </div>
+          </div>
+
+          <!-- Inbound webhook channel -->
+          <div id="panelInbox" class="panel" hidden>
+            <div class="card-title"><span class="ic">📥</span><span data-i18n="inbox_title">Webhook Inbox</span></div>
+            <div class="card-sub" data-i18n="inbox_desc">Let a mail source push messages to the agent — no polling. Works with a Cloudflare Email Worker or a self-hosted mail server.</div>
+
+            <label for="inboxHookUrl" data-i18n="inbox_hook_url">Webhook URL</label>
+            <div class="pwd-wrap">
+              <input id="inboxHookUrl" readonly placeholder="—" />
+              <button type="button" id="inboxCopy" class="pwd-toggle" data-i18n-aria="inbox_copy" aria-label="Copy">📋</button>
+            </div>
+            <div class="hint help-block" id="inboxHookHint"></div>
+
+            <label for="inboxDomains" data-i18n="inbox_domains">Allowed recipient domains</label>
+            <input id="inboxDomains" data-i18n-ph="inbox_domains_ph" placeholder="example.com, mail.example.com" />
+            <div class="hint" data-i18n="inbox_domains_hint">Comma-separated. Empty means accept every recipient.</div>
+
+            <label for="inboxPrefixes" data-i18n="inbox_prefixes">Allowed address prefixes</label>
+            <input id="inboxPrefixes" data-i18n-ph="inbox_prefixes_ph" placeholder="otp-, code-" />
+            <div class="hint" data-i18n="inbox_prefixes_hint">Comma-separated. Empty means accept any local part. A catch-all domain accepts mail from anyone, so narrowing this matters.</div>
+
+            <div id="inboxStats" class="hint"></div>
+
+            <div class="row" style="margin-top:14px;">
+              <button id="inboxSave" class="primary" data-i18n="inbox_save">Save</button>
+              <button id="inboxRotate" data-i18n="inbox_rotate">Rotate token</button>
+              <button id="inboxDisable" class="danger" data-i18n="inbox_disable">Disable</button>
+              <span id="inboxMsg" class="status-msg"></span>
             </div>
           </div>
 

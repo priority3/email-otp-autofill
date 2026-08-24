@@ -18,7 +18,8 @@ const SELECTED_OTP_KEY = "selectedOtpId";
 const PROVIDER_META = {
   qq: { name: "QQ 邮箱", icon: "📩" },
   outlook: { name: "Outlook", icon: "📨" },
-  gmail: { name: "Gmail", icon: "📧" }
+  gmail: { name: "Gmail", icon: "📧" },
+  inbox: { name: "Webhook", icon: "📥" }
 };
 
 function providerMeta(provider) {
@@ -35,7 +36,10 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
-// "12s ago · noreply@foo.com" — provider moved to its own source tag.
+// "12s ago · → me@my.dev · noreply@foo.com" — provider moved to its own source tag.
+// Reason: the receiving address matters as much as the sender once a catch-all
+// domain or several mailboxes are connected — it tells you which of your
+// addresses this code was issued for.
 function formatMeta(otp) {
   if (!otp) return t(LANG, "no_otp_yet");
   const parts = [];
@@ -43,6 +47,7 @@ function formatMeta(otp) {
     const ageSec = Math.max(0, Math.floor((Date.now() - otp.receivedAt) / 1000));
     parts.push(t(LANG, "n_sec_ago", { n: ageSec }));
   }
+  if (otp.account) parts.push(`→ ${otp.account}`);
   if (otp.from) parts.push(otp.from);
   return parts.join(" · ");
 }

@@ -61,7 +61,7 @@ function refreshPwdToggleLabels() {
 
 // ---- i18n ----------------------------------------------------------------
 function applyRichI18n() {
-  const map = { qqHowto: "qq_howto" };
+  const map = { qqHowto: "qq_howto", inboxHookHint: "inbox_hook_hint" };
   for (const id of Object.keys(map)) {
     const el = $(id);
     if (el) el.innerHTML = T(map[id]);
@@ -81,7 +81,7 @@ function applyLang(lang) {
 }
 
 // ---- panel switching -----------------------------------------------------
-const PANELS = ["panelEmpty", "panelAgent", "panelAccount"];
+const PANELS = ["panelEmpty", "panelAgent", "panelInbox", "panelAccount"];
 
 function showPanel(id) {
   for (const p of PANELS) {
@@ -95,6 +95,8 @@ function setNavActive(key) {
   allNavItems.forEach((el) => el.classList.remove("active"));
   if (key === "agent") {
     $("navAgent").classList.add("active");
+  } else if (key === "inbox") {
+    $("navInbox").classList.add("active");
   } else if (key === "add") {
     $("navAdd").classList.add("active");
   } else if (key && key.type) {
@@ -582,10 +584,132 @@ async function refreshStatus() {
     toggleOutlookActions(!!ol.oauthConnected);
     // Sync Gmail OAuth action buttons with connection state.
     toggleGmailActions(!!gm.oauthConnected);
+
+    // Inbound webhook state is a separate call — an older agent 404s here and
+    // the card stays hidden.
+    await refreshInbox();
   } catch (e) {
     setAgentStatus(false, String(e && e.message ? e.message : e));
     accounts = [];
     renderAccountList();
+  }
+}
+
+// ---- inbound webhook channel ---------------------------------------------
+
+// Last status payload, so Save can send unchanged fields back untouched.
+let inboxState = null;
+
+function selectInbox() {
+  setNavActive("inbox");
+  showPanel("panelInbox");
+  setMsg("inboxMsg", "");
+}
+
+function parseCsvList(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// Compose the URL the user pastes into their mail source. The agent only returns
+// the path — it sits behind a tunnel and cannot know its own public origin.
+async function inboxHookUrl(status) {
+  if (!status || !status.ingestToken) return "";
+  const raw = await chrome.storage.local.get(["agentBaseUrl"]);
+  const base = String(raw.agentBaseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
+  const path = status.hookPath || "/v1/inbox/hook";
+  return `${base}${path}/${status.ingestToken}`;
+}
+
+function renderInboxStats(status) {
+  const s = (status && status.stats) || {};
+  if (!status || !status.tokenSet) {
+    setMsg("inboxStats", T("inbox_stats_none"));
+    return;
+  }
+  const when = s.lastInboundAt ? new Date(s.lastInboundAt).toLocaleString() : T("inbox_never");
+  const reason = s.lastSkipReason ? ` · ${T("inbox_last_skip")}: ${s.lastSkipReason}` : "";
+  setMsg(
+    "inboxStats",
+    `${T("inbox_last_push")}: ${when} · ${T("inbox_accepted")}: ${s.accepted || 0} · ${T("inbox_skipped")}: ${s.skipped || 0}${reason}`
+  );
+}
+
+async function renderInbox(status) {
+  inboxState = status || null;
+  $("inboxHookUrl").value = await inboxHookUrl(status);
+  $("inboxDomains").value = ((status && status.allowedDomains) || []).join(", ");
+  $("inboxPrefixes").value = ((status && status.allowedPrefixes) || []).join(", ");
+  renderInboxStats(status);
+}
+
+// Fetch inbox state and reveal the sidebar entry. A 404 means the agent predates
+// this feature — hide the card rather than showing an error.
+async function refreshInbox() {
+  const r = await bg({ type: "BG_INBOX_STATUS" });
+  const supported = !!(r && r.ok && r.inbox);
+  $("navInbox").hidden = !supported;
+  if (!supported) {
+    inboxState = null;
+    return;
+  }
+  await renderInbox(r.inbox);
+}
+
+async function rotateInboxToken() {
+  setMsg("inboxMsg", T("saving"));
+  try {
+    await bg({ type: "BG_INBOX_ROTATE" });
+    await refreshInbox();
+    setMsg("inboxMsg", T("inbox_rotated"));
+  } catch (e) {
+    setMsg("inboxMsg", String(e && e.message ? e.message : e));
+  }
+}
+
+async function saveInboxConfig() {
+  setMsg("inboxMsg", T("saving"));
+  try {
+    await bg({
+      type: "BG_INBOX_CONFIG",
+      payload: {
+        allowedDomains: parseCsvList($("inboxDomains").value),
+        allowedPrefixes: parseCsvList($("inboxPrefixes").value)
+      }
+    });
+    await refreshInbox();
+    setMsg("inboxMsg", T("saved"));
+  } catch (e) {
+    setMsg("inboxMsg", String(e && e.message ? e.message : e));
+  }
+}
+
+async function disableInbox() {
+  setMsg("inboxMsg", T("saving"));
+  try {
+    await bg({ type: "BG_INBOX_DISABLE" });
+    await refreshInbox();
+    setMsg("inboxMsg", T("inbox_disabled"));
+  } catch (e) {
+    setMsg("inboxMsg", String(e && e.message ? e.message : e));
+  }
+}
+
+async function copyInboxUrl() {
+  const value = $("inboxHookUrl").value;
+  if (!value) {
+    setMsg("inboxMsg", T("inbox_no_token"));
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    setMsg("inboxMsg", T("copied"));
+  } catch {
+    // Clipboard API can be blocked; select the text so the user can copy manually.
+    $("inboxHookUrl").select();
+    setMsg("inboxMsg", T("inbox_copy_manual"));
   }
 }
 
@@ -895,7 +1019,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   $("navAgent").addEventListener("click", selectAgent);
+  $("navInbox").addEventListener("click", selectInbox);
   $("navAdd").addEventListener("click", selectAdd);
+  $("inboxSave").addEventListener("click", saveInboxConfig);
+  $("inboxRotate").addEventListener("click", rotateInboxToken);
+  $("inboxDisable").addEventListener("click", disableInbox);
+  $("inboxCopy").addEventListener("click", copyInboxUrl);
   $("refreshStatus").addEventListener("click", refreshStatus);
   $("saveExt").addEventListener("click", saveExtSettings);
   $("acctType").addEventListener("change", () => renderAccountFormByType($("acctType").value));

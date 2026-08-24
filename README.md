@@ -44,6 +44,10 @@ Two ways to connect:
 - **Gmail Pub/Sub push**: real-time OTP delivery via Google Cloud Pub/Sub —
   zero polling delay, lower API quota usage. Falls back to polling if Pub/Sub
   is not configured.
+- **Webhook inbox (self-hosted / disposable mail)**: let the mail source push to
+  the agent instead. Works with a Cloudflare Email Worker catch-all domain or a
+  self-hosted mail server — every address under one domain, five lines of Worker
+  code. See [docs/inbound-webhook.md](docs/inbound-webhook.md).
 - **OTP extraction**: keyword + scoring match for 4–8 digit codes (中/English
   keywords), with automatic validity-window detection (10s–24h).
 - **Hotkey autofill**: `⌘/Ctrl + Shift + .` finds the OTP input and fills it; a

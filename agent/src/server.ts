@@ -6,6 +6,11 @@ import { z } from "zod";
 
 import { AGENT_HOST, AGENT_PORT, MASTER_KEY } from "./constants.js";
 import { cors, noStore, requireClientHeader } from "./http/middleware.js";
+import { InboxChannel } from "./inbox/channel.js";
+import { parseInbound } from "./inbox/parse.js";
+import { INBOX_HOOK_PATH, isInboxHookPath } from "./inbox/path.js";
+import { PER_IP_PER_MIN, PER_TOKEN_PER_MIN, RateLimiter } from "./inbox/rate-limit.js";
+import { clearToken, getToken, issueToken, resolveToken } from "./storage/ingest-tokens.js";
 import { extractBearerToken, verifyGoogleOidcToken } from "./http/verify-oidc.js";
 import {
   createSession,
@@ -16,7 +21,7 @@ import {
   resolveSession,
 } from "./http/auth.js";
 import { consumeOAuthState, createOAuthState } from "./http/oauth-state.js";
-import { OtpStore } from "./otp/store.js";
+import { OtpStore, type ProviderId } from "./otp/store.js";
 import { ProviderManager, ProviderRegistry } from "./providers/manager.js";
 import { verifyImap } from "./providers/imap.js";
 import { db, migrateJsonToDb } from "./storage/db.js";
@@ -52,15 +57,17 @@ import {
   setPubSubAudience,
 } from "./storage/settings.js";
 
-function parseProviders(raw: string | undefined): ("qq" | "outlook" | "gmail")[] | undefined {
+function parseProviders(raw: string | undefined): ProviderId[] | undefined {
   if (!raw) return undefined;
   const parts = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const set = new Set<"qq" | "outlook" | "gmail">();
+  const set = new Set<ProviderId>();
   for (const p of parts) {
-    if (p === "qq" || p === "outlook" || p === "gmail") set.add(p);
+    // Reason: keep this list in sync with ProviderId — an unlisted provider is
+    // silently dropped from every filtered query.
+    if (p === "qq" || p === "outlook" || p === "gmail" || p === "inbox") set.add(p);
   }
   return set.size ? [...set] : undefined;
 }
@@ -82,15 +89,32 @@ export async function startServer() {
   app.disable("x-powered-by");
   app.use(cors);
   app.use(noStore);
-  // Skip JSON parsing for the Pub/Sub webhook — it receives raw push bodies.
+  // Skip JSON parsing for the raw-body webhooks: Pub/Sub push bodies, and the
+  // inbound mail hook (which may carry a full RFC822 message).
   app.use((req, res, next) => {
     if (req.path === "/v1/gmail/pubsub" && req.method === "POST") return next();
+    if (isInboxHookPath(req.path) && req.method === "POST") return next();
     return express.json({ limit: "256kb" })(req, res, next);
   });
   app.use(requireClientHeader);
 
   const store = new OtpStore();
   const registry = new ProviderRegistry(store);
+
+  // Inbound webhook channel + its abuse guards. Per-IP is checked before the
+  // token lookup so token guessing never reaches SQLite.
+  const inbox = new InboxChannel(store);
+  const ipLimiter = new RateLimiter(PER_IP_PER_MIN);
+  const tokenLimiter = new RateLimiter(PER_TOKEN_PER_MIN);
+  const limiterSweep = setInterval(
+    () => {
+      const now = Date.now();
+      ipLimiter.sweep(now);
+      tokenLimiter.sweep(now);
+    },
+    5 * 60 * 1000
+  );
+  limiterSweep.unref();
 
   // Boot watchers for every registered user.
   await registry.bootstrap(await listUserIds());
@@ -175,6 +199,8 @@ export async function startServer() {
     if (p === "/v1/status" || p.startsWith("/v1/auth/") || p.startsWith("/v1/admin/")) return next();
     if (p === "/v1/gmail/pubsub" && req.method === "POST") return next();
     if (p === "/v1/gmail/auth/callback") return next(); // OAuth redirect from Google (identity via state)
+    // Inbound mail hook authenticates with its own ingest token, not a session.
+    if (isInboxHookPath(p) && req.method === "POST") return next();
     return requireAuth(req, res, next);
   });
 
@@ -308,6 +334,124 @@ export async function startServer() {
   app.post("/v1/qq/clear", async (req, res) => {
     const mgr = await mgrFor(req);
     await mgr.clearQq();
+    res.json({ ok: true });
+  });
+
+  // ---- inbox (inbound webhook) -------------------------------------------
+
+  /*
+   * Public push endpoint. Two forms, same handler:
+   *   POST /v1/inbox/hook            + header x-otp-ingest-token
+   *   POST /v1/inbox/hook/<token>    (for sources that can only be given a URL)
+   *
+   * Response policy: 401 for a bad/absent token and 429 for rate limiting —
+   * those are configuration errors the sender must act on. Everything else
+   * ("no code in this mail", "recipient not allowed", "unparseable") answers
+   * 200 with a `skipped` reason, so a mail source never retries a message we
+   * deliberately dropped. GET /v1/inbox/status surfaces those skips instead.
+   */
+  const inboxHook: express.RequestHandler = async (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    if (!ipLimiter.take(ip)) return res.status(429).json({ ok: false, error: "rate_limited" });
+
+    const headerToken = req.headers["x-otp-ingest-token"];
+    const fromHeader = Array.isArray(headerToken) ? headerToken[0] : headerToken;
+    const token = String(fromHeader || req.params.token || "").trim();
+    if (!token) return res.status(401).json({ ok: false, error: "missing_ingest_token" });
+
+    const userId = resolveToken(token);
+    if (!userId) return res.status(401).json({ ok: false, error: "invalid_ingest_token" });
+
+    if (!tokenLimiter.take(token)) return res.status(429).json({ ok: false, error: "rate_limited" });
+
+    try {
+      const mgr = await registry.getOrCreate(userId);
+      if (!mgr.config.inbox.enabled) {
+        inbox.recordSkip(userId, "channel_disabled");
+        return res.status(200).json({ ok: true, skipped: "channel_disabled" });
+      }
+
+      const body = Buffer.isBuffer(req.body) ? req.body : Buffer.from(String(req.body ?? ""));
+      const msg = await parseInbound(body, String(req.headers["content-type"] || ""));
+      if (!msg) {
+        inbox.recordSkip(userId, "parse_failed");
+        return res.status(200).json({ ok: true, skipped: "parse_failed" });
+      }
+
+      const result = inbox.ingest(msg, userId, mgr.config.inbox);
+      if (!result.ok) return res.status(200).json({ ok: true, skipped: result.skipped });
+      return res.status(200).json({ ok: true });
+    } catch (e) {
+      // Reason: never surface an internal failure as a retryable error to the
+      // mail source. Log without the body — it holds someone's mail.
+      console.error(`[inbox-hook] handler error: ${String((e as any)?.message || e)}`);
+      inbox.recordSkip(userId, "internal_error");
+      return res.status(200).json({ ok: false, error: "internal_error" });
+    }
+  };
+
+  const rawInboundBody = express.raw({ type: "*/*", limit: "1mb" });
+  app.post(INBOX_HOOK_PATH, rawInboundBody, inboxHook);
+  app.post(`${INBOX_HOOK_PATH}/:token`, rawInboundBody, inboxHook);
+
+  // Session-authenticated management surface.
+  app.get("/v1/inbox/status", async (req, res) => {
+    const userId = String(req.userId);
+    const mgr = await mgrFor(req);
+    const token = getToken(userId);
+    res.json({
+      ok: true,
+      enabled: mgr.config.inbox.enabled,
+      tokenSet: Boolean(token),
+      // Path only: the agent binds to 127.0.0.1 and sits behind a tunnel or
+      // reverse proxy, so it cannot know its own public origin. The extension
+      // already holds the Agent Base URL and composes the full hook URL.
+      hookPath: INBOX_HOOK_PATH,
+      ingestToken: token,
+      allowedDomains: mgr.config.inbox.allowedDomains,
+      allowedPrefixes: mgr.config.inbox.allowedPrefixes,
+      stats: inbox.statsFor(userId),
+    });
+  });
+
+  // Issue or replace the token. Enables the channel on first issue, since a
+  // token with the channel off would silently drop everything.
+  app.post("/v1/inbox/token/rotate", async (req, res) => {
+    const userId = String(req.userId);
+    const token = issueToken(userId);
+    const mgr = await mgrFor(req);
+    if (!mgr.config.inbox.enabled) {
+      await mgr.updateConfig((c) => {
+        c.inbox.enabled = true;
+      });
+    }
+    res.json({ ok: true, ingestToken: token });
+  });
+
+  app.post("/v1/inbox/config", async (req, res) => {
+    const List = z.array(z.string().trim().min(1)).max(50);
+    const Body = z.object({
+      enabled: z.boolean().optional(),
+      allowedDomains: List.optional(),
+      allowedPrefixes: List.optional(),
+    });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    await mgr.updateConfig((c) => {
+      if (body.data.enabled !== undefined) c.inbox.enabled = body.data.enabled;
+      if (body.data.allowedDomains) c.inbox.allowedDomains = body.data.allowedDomains;
+      if (body.data.allowedPrefixes) c.inbox.allowedPrefixes = body.data.allowedPrefixes;
+    });
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/inbox/disable", async (req, res) => {
+    clearToken(String(req.userId));
+    const mgr = await mgrFor(req);
+    await mgr.updateConfig((c) => {
+      c.inbox.enabled = false;
+    });
     res.json({ ok: true });
   });
 

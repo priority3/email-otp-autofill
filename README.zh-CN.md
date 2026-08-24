@@ -36,6 +36,9 @@ Chrome 扩展轮询一个 **agent** 服务。agent 通过 IMAP / OAuth 连接你
 
 - **邮箱**：QQ 邮箱（IMAP 授权码）、Outlook（OAuth 设备码流程）与 Gmail（OAuth 授权码流程），多账号并行运行。
 - **Gmail Pub/Sub 推送**：通过 Google Cloud Pub/Sub 实时获取验证码——零轮询延迟，更低 API 配额消耗。未配置 Pub/Sub 时自动回退到轮询模式。
+- **Webhook 收件（自建 / 临时邮箱）**：让邮件源把邮件推给 agent，支持 Cloudflare Email
+  Worker 的 catch-all 域名与自建邮局。一个域名下所有地址通吃，Worker 侧只需 5 行代码。
+  见 [docs/inbound-webhook.md](docs/inbound-webhook.md)。
 - **验证码提取**：关键词 + 打分匹配 4–8 位验证码（中 / 英文关键词），自动识别有效期
   窗口（10 秒–24 小时）。
 - **快捷键填充**：`⌘/Ctrl + Shift + .` 定位验证码输入框并填充；工具栏红色角标提示有
