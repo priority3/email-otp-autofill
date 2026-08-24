@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 
 import { CLIENT_HEADER_NAME, CLIENT_HEADER_VALUE } from "../constants.js";
+import { isInboxHookPath } from "../inbox/path.js";
 
 function isAllowedOrigin(origin: string | undefined): boolean {
   if (!origin) return false;
@@ -38,6 +39,9 @@ export function requireClientHeader(req: Request, res: Response, next: NextFunct
   if (req.path === "/v1/status" || req.path === "/admin") return next();
   if (req.path === "/v1/gmail/pubsub" && req.method === "POST") return next();
   if (req.path === "/v1/gmail/auth/callback") return next(); // OAuth redirect from Google
+  // Inbound mail hook: pushed by a mail source, not a browser — it cannot be
+  // expected to send our extension's client header.
+  if (isInboxHookPath(req.path) && req.method === "POST") return next();
 
   const v = req.headers[CLIENT_HEADER_NAME] ?? req.headers[CLIENT_HEADER_NAME.toLowerCase()];
   const value = Array.isArray(v) ? v[0] : v;

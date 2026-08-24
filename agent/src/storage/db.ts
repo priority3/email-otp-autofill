@@ -66,6 +66,12 @@ function addColumnIfMissing(table: string, columnDef: string): void {
 addColumnIfMissing("users", "invite_code TEXT"); // invite used at registration
 addColumnIfMissing("users", "last_seen INTEGER"); // activity tracking
 addColumnIfMissing("users", "disabled INTEGER DEFAULT 0"); // soft-delete / deactivation
+addColumnIfMissing("users", "ingest_token TEXT"); // inbound webhook token (one per user)
+
+// Reason: the inbound webhook looks users up BY token, so the column must be
+// unique. SQLite treats NULLs as distinct in a UNIQUE index, so existing rows
+// (all NULL until a token is issued) do not collide.
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_ingest_token ON users(ingest_token);`);
 
 // One-time import of legacy JSON files into the DB. Runs only when the relevant
 // table is still empty, so it's safe to call on every startup. Preserves the

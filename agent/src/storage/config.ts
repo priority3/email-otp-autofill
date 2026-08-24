@@ -31,6 +31,16 @@ const ConfigSchema = z.object({
       topicName: z.string().optional(),
     })
     .default(() => ({ mode: "oauth" as const, pubsubEnabled: false })),
+  // Inbound webhook channel: the mail source pushes to us. Both allow-lists
+  // empty means "accept every recipient" — a domain catch-all is wide open, so
+  // narrowing it here is the only server-side defence (see D4 in the task PRD).
+  inbox: z
+    .object({
+      enabled: z.boolean().default(false),
+      allowedDomains: z.array(z.string()).default(() => []),
+      allowedPrefixes: z.array(z.string()).default(() => []),
+    })
+    .default(() => ({ enabled: false, allowedDomains: [], allowedPrefixes: [] })),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

@@ -135,6 +135,37 @@
         'How to get it: sign in to <a href="https://mail.qq.com" target="_blank" rel="noopener">QQ Mail (web)</a> → Settings → Account → find "POP3/IMAP/SMTP Service" → enable "IMAP/SMTP Service" → verify by SMS as prompted → the generated authorization code goes here.',
       save_qq: "Save QQ",
 
+      // --- inbound webhook channel ---
+      inbox_nav: "Webhook Inbox",
+      inbox_title: "Webhook Inbox",
+      inbox_desc:
+        "Let a mail source push messages to the agent — no polling, no per-provider setup. Works with a Cloudflare Email Worker or a self-hosted mail server.",
+      inbox_hook_url: "Webhook URL",
+      inbox_copy: "Copy webhook URL",
+      inbox_hook_hint:
+        'Preferred: POST to <code>/v1/inbox/hook</code> with the token in an <code>x-otp-ingest-token</code> header. The URL above embeds the token in the path instead, for sources that only accept a URL — that form leaks the token into proxy and CDN access logs. Body may be <code>application/json</code> or a raw <code>message/rfc822</code> message.',
+      inbox_domains: "Allowed recipient domains",
+      inbox_domains_ph: "example.com, mail.example.com",
+      inbox_domains_hint: "Comma-separated. Empty means accept every recipient.",
+      inbox_prefixes: "Allowed address prefixes",
+      inbox_prefixes_ph: "otp-, code-",
+      inbox_prefixes_hint:
+        "Comma-separated, matched against the part before the @. Empty means accept any. A catch-all domain accepts mail from anyone, so narrowing this matters.",
+      inbox_save: "Save",
+      inbox_rotate: "Rotate token",
+      inbox_disable: "Disable",
+      inbox_rotated: "New token issued.",
+      inbox_disabled: "Channel disabled and token revoked.",
+      inbox_no_token: "No token yet — click “Rotate token” first.",
+      inbox_copy_manual: "Could not use the clipboard — the URL is selected, copy it manually.",
+      inbox_stats_none: "Not enabled yet. Click “Rotate token” to get a webhook URL.",
+      inbox_last_push: "Last push",
+      inbox_never: "never",
+      inbox_accepted: "accepted",
+      inbox_skipped: "skipped",
+      inbox_last_skip: "last skip reason",
+      type_inbox: "Webhook",
+
       // --- Outlook ---
       outlook_title: "Outlook",
       outlook_desc: "Use OAuth to connect Outlook.",
@@ -282,6 +313,37 @@
         '获取途径：登录 <a href="https://mail.qq.com" target="_blank" rel="noopener">QQ 邮箱网页版</a> → 设置 → 账号 → 找到「POP3/IMAP/SMTP 服务」→ 开启「IMAP/SMTP 服务」→ 按提示用手机发送短信验证 → 生成的授权码填入此处。',
       save_qq: "保存 QQ",
 
+      // --- 入站 webhook 通道 ---
+      inbox_nav: "Webhook 收件",
+      inbox_title: "Webhook 收件",
+      inbox_desc:
+        "让邮件源把邮件推送给 agent —— 无需轮询，也不用逐家适配。适用于 Cloudflare Email Worker 或自建邮局。",
+      inbox_hook_url: "Webhook 地址",
+      inbox_copy: "复制 webhook 地址",
+      inbox_hook_hint:
+        '推荐用法：POST 到 <code>/v1/inbox/hook</code>，token 放在 <code>x-otp-ingest-token</code> 请求头里。上面这个地址把 token 放在了路径里，是给「只能填一个 URL」的邮件源用的 —— 这种形式会让 token 进入反向代理和 CDN 的访问日志。请求体可以是 <code>application/json</code>，也可以是原始 <code>message/rfc822</code> 邮件。',
+      inbox_domains: "允许的收件域名",
+      inbox_domains_ph: "example.com, mail.example.com",
+      inbox_domains_hint: "英文逗号分隔。留空表示接受任意收件人。",
+      inbox_prefixes: "允许的地址前缀",
+      inbox_prefixes_ph: "otp-, code-",
+      inbox_prefixes_hint:
+        "英文逗号分隔，匹配 @ 之前的部分。留空表示不限。catch-all 域名任何人都能投递，所以收窄这里是有意义的。",
+      inbox_save: "保存",
+      inbox_rotate: "轮换 token",
+      inbox_disable: "停用",
+      inbox_rotated: "已生成新 token。",
+      inbox_disabled: "通道已停用，token 已吊销。",
+      inbox_no_token: "还没有 token —— 先点「轮换 token」。",
+      inbox_copy_manual: "无法访问剪贴板 —— 地址已选中，请手动复制。",
+      inbox_stats_none: "尚未启用。点「轮换 token」即可拿到 webhook 地址。",
+      inbox_last_push: "最近一次推送",
+      inbox_never: "从未",
+      inbox_accepted: "已接收",
+      inbox_skipped: "已丢弃",
+      inbox_last_skip: "最近丢弃原因",
+      type_inbox: "Webhook",
+
       // --- Outlook ---
       outlook_title: "Outlook",
       outlook_oauth_desc: "使用 OAuth 连接 Outlook 邮箱。",
@@ -318,7 +380,7 @@
   };
 
   // Keys whose values contain HTML and must be set via innerHTML on the page.
-  const RICH_KEYS = new Set(["base_url_hint", "qq_howto", "client_id_howto"]);
+  const RICH_KEYS = new Set(["base_url_hint", "qq_howto", "client_id_howto", "inbox_hook_hint"]);
 
   function normalizeLang(lang) {
     return lang === "zh" || lang === "en" ? lang : null;

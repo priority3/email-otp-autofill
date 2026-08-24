@@ -2,6 +2,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 
 import { extractBestOtp } from "../otp/extract.js";
+import { otpSourceText } from "../otp/html.js";
 import type { OtpStore, ProviderId } from "../otp/store.js";
 
 export type ImapAuth = {
@@ -93,14 +94,6 @@ export async function verifyImap(input: VerifyImapInput): Promise<VerifyImapResu
   const result = await Promise.race([attempt, deadline]);
   if (timer) clearTimeout(timer);
   return result;
-}
-
-function stripHtml(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/[ \t]+/g, " ");
 }
 
 const JUNK_NAME_HINTS = [
@@ -339,9 +332,11 @@ export class ImapOtpWatcher {
       if (!anyMsg.source) return;
 
       const parsed = await simpleParser(anyMsg.source as Buffer);
-      const text = parsed.text?.trim() || "";
-      const html = parsed.html ? stripHtml(String(parsed.html)) : "";
-      const raw = `${parsed.subject ?? ""}\n${text}\n${html}`;
+      const raw = otpSourceText({
+        subject: parsed.subject,
+        text: parsed.text?.trim() || "",
+        html: parsed.html ? String(parsed.html) : "",
+      });
       const best = extractBestOtp(raw);
       if (!best) return;
 
