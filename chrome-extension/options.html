@@ -126,6 +126,7 @@
               <option value="qq" data-i18n="type_qq">QQ Mail (IMAP)</option>
               <option value="outlook_oauth" data-i18n="type_outlook_oauth">Outlook (OAuth)</option>
               <option value="gmail_oauth" data-i18n="type_gmail_oauth">Gmail (OAuth)</option>
+              <option value="cfmail" data-i18n="type_cfmail">CF Temp Email</option>
             </select>
 
             <!-- QQ fields (shown when type=qq) -->
@@ -176,6 +177,31 @@
               </div>
               <div class="hint" id="gmailDeviceCodeMsg"></div>
               <span id="gmailOauthMsg" class="status-msg"></span>
+            </div>
+
+            <!-- CF Temp Email fields (shown when type=cfmail) -->
+            <div id="cfmailFields" hidden>
+              <label for="cfmailBaseUrl" data-i18n="cfmail_base_url">API Base URL</label>
+              <input id="cfmailBaseUrl" placeholder="https://mail.example.com" />
+
+              <label for="cfmailEmail" data-i18n="cfmail_email">Email address</label>
+              <input id="cfmailEmail" placeholder="you@example.com" />
+
+              <label for="cfmailJwt"><span data-i18n="cfmail_jwt">Address JWT</span></label>
+              <div class="pwd-wrap">
+                <input id="cfmailJwt" type="password" placeholder="eyJ..." />
+                <button type="button" class="pwd-toggle" data-toggle="cfmailJwt" aria-label="Show password"></button>
+              </div>
+
+              <label for="cfmailSitePwd" data-i18n="cfmail_site_password">Site password (optional)</label>
+              <div class="pwd-wrap">
+                <input id="cfmailSitePwd" type="password" placeholder="" />
+                <button type="button" class="pwd-toggle" data-toggle="cfmailSitePwd" aria-label="Show password"></button>
+              </div>
+
+              <div class="hint help-block" id="cfmailHowto" data-i18n="cfmail_howto">
+                How to get it: open your CF temp-mail frontend → create or log into a mailbox → copy the Address JWT from the UI → paste it here.
+              </div>
             </div>
 
             <div class="row" style="margin-top:12px;" id="acctActions">

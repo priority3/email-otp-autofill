@@ -57,6 +57,7 @@
       type_qq: "QQ Mail (IMAP)",
       type_outlook_oauth: "Outlook (OAuth)",
       type_gmail_oauth: "Gmail (OAuth)",
+      type_cfmail: "CF Temp Email",
       remove_account: "Remove",
       removing: "Removing…",
       no_account_selected: "No account selected",
@@ -135,6 +136,14 @@
         'How to get it: sign in to <a href="https://mail.qq.com" target="_blank" rel="noopener">QQ Mail (web)</a> → Settings → Account → find "POP3/IMAP/SMTP Service" → enable "IMAP/SMTP Service" → verify by SMS as prompted → the generated authorization code goes here.',
       save_qq: "Save QQ",
 
+      // --- CF Temp Email ---
+      cfmail_base_url: "API Base URL",
+      cfmail_email: "Email address",
+      cfmail_jwt: "Address JWT",
+      cfmail_site_password: "Site password (optional)",
+      cfmail_howto:
+        'How to get it: open your CF temp-mail frontend (e.g. https://mail.example.com) → create or log into a mailbox → copy the Address JWT from the UI → paste it here. The site password is only needed if the deployment enabled site access password (x-custom-auth).',
+
       // --- Outlook ---
       outlook_title: "Outlook",
       outlook_desc: "Use OAuth to connect Outlook.",
@@ -204,6 +213,8 @@
       account_type: "账号类型",
       type_qq: "QQ 邮箱（IMAP）",
       type_outlook_oauth: "Outlook（OAuth）",
+      type_gmail_oauth: "Gmail（OAuth）",
+      type_cfmail: "CF 临时邮箱",
       remove_account: "删除",
       removing: "删除中…",
       no_account_selected: "未选择账号",
@@ -282,6 +293,14 @@
         '获取途径：登录 <a href="https://mail.qq.com" target="_blank" rel="noopener">QQ 邮箱网页版</a> → 设置 → 账号 → 找到「POP3/IMAP/SMTP 服务」→ 开启「IMAP/SMTP 服务」→ 按提示用手机发送短信验证 → 生成的授权码填入此处。',
       save_qq: "保存 QQ",
 
+      // --- CF 临时邮箱 ---
+      cfmail_base_url: "API 地址",
+      cfmail_email: "邮箱地址",
+      cfmail_jwt: "Address JWT",
+      cfmail_site_password: "站点密码(可选)",
+      cfmail_howto:
+        '获取途径:打开 CF 临时邮箱前端页面(如 https://mail.example.com)→ 创建或登录邮箱 → 在界面中复制 Address JWT → 粘贴到此处。站点密码仅在部署启用了站点访问密码(x-custom-auth)时需要填写。',
+
       // --- Outlook ---
       outlook_title: "Outlook",
       outlook_oauth_desc: "使用 OAuth 连接 Outlook 邮箱。",
@@ -318,7 +337,7 @@
   };
 
   // Keys whose values contain HTML and must be set via innerHTML on the page.
-  const RICH_KEYS = new Set(["base_url_hint", "qq_howto", "client_id_howto"]);
+  const RICH_KEYS = new Set(["base_url_hint", "qq_howto", "client_id_howto", "cfmail_howto"]);
 
   function normalizeLang(lang) {
     return lang === "zh" || lang === "en" ? lang : null;

@@ -52,15 +52,15 @@ import {
   setPubSubAudience,
 } from "./storage/settings.js";
 
-function parseProviders(raw: string | undefined): ("qq" | "outlook" | "gmail")[] | undefined {
+function parseProviders(raw: string | undefined): ("qq" | "outlook" | "gmail" | "cfmail")[] | undefined {
   if (!raw) return undefined;
   const parts = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const set = new Set<"qq" | "outlook" | "gmail">();
+  const set = new Set<"qq" | "outlook" | "gmail" | "cfmail">();
   for (const p of parts) {
-    if (p === "qq" || p === "outlook" || p === "gmail") set.add(p);
+    if (p === "qq" || p === "outlook" || p === "gmail" || p === "cfmail") set.add(p);
   }
   return set.size ? [...set] : undefined;
 }
@@ -207,6 +207,13 @@ export async function startServer() {
     const gmailOauthConnected = await mgr.getGmailOAuth().hasRefreshToken();
     const gmailOauthEmail = gmailOauthConnected ? await mgr.getGmailOAuth().getAccountEmail() : null;
     const googleClientId = getGoogleClientId();
+    const cfmailAccounts = await Promise.all(
+      cfg.cfmail.accounts.map(async (a) => ({
+        email: a.email,
+        baseUrl: a.baseUrl,
+        configured: await mgr.getCfMail().hasJwt(a.email),
+      }))
+    );
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
@@ -231,6 +238,7 @@ export async function startServer() {
           oauthConnected: gmailOauthConnected,
           oauthEmail: gmailOauthEmail,
         },
+        cfmail: { accounts: cfmailAccounts },
       },
     });
   });
@@ -587,8 +595,60 @@ export async function startServer() {
       ok: true,
       pubsubEnabled: mgr.config.gmail.pubsubEnabled,
       topicName: mgr.config.gmail.topicName ?? null,
-      ...pubsub,
+     ...pubsub,
+   });
+ });
+
+  // ---- CF Temp Email ------------------------------------------------------
+  app.post("/v1/cfmail/config", async (req, res) => {
+    const Body = z.object({
+      email: z.string().email(),
+      baseUrl: z.string().url(),
+      jwt: z.string().min(10),
+      sitePassword: z.string().optional(),
     });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    const v = await mgr.getCfMail().verifyJwt(
+      body.data.baseUrl,
+      body.data.jwt,
+      body.data.sitePassword || ""
+    );
+    if (!v.ok) return res.status(400).json({ ok: false, error: v.error });
+    const email = v.address || body.data.email;
+    await mgr.getCfMail().setJwt(email, body.data.jwt);
+    if (body.data.sitePassword) await mgr.getCfMail().setSitePassword(email, body.data.sitePassword);
+    await mgr.addCfmailAccount(email, body.data.baseUrl);
+    await mgr.reconcile();
+    res.json({ ok: true, email });
+  });
+
+  app.post("/v1/cfmail/remove", async (req, res) => {
+    const Body = z.object({ email: z.string().email() });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    await mgr.removeCfmailAccount(body.data.email);
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/cfmail/clear", async (req, res) => {
+    const mgr = await mgrFor(req);
+    await mgr.clearCfmail();
+    res.json({ ok: true });
+  });
+
+  app.post("/v1/cfmail/reveal", async (req, res) => {
+    const Body = z.object({
+      email: z.string().email(),
+      kind: z.enum(["jwt", "sitepwd"]).default("jwt"),
+    });
+    const body = Body.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ ok: false, error: "bad_request" });
+    const mgr = await mgrFor(req);
+    const value = await secretGet(mgr.secretKeyForCfmail(body.data.email, body.data.kind));
+    res.json({ ok: true, value: value ?? null });
   });
 
   // ---- admin API (token-gated via requireAdmin) --------------------------
@@ -682,6 +742,9 @@ export async function startServer() {
     if (cfg.gmail.mode === "oauth" && getGoogleClientId() && getGoogleClientSecret() && (await mgr.getGmailOAuth().hasRefreshToken())) {
       const email = await mgr.getGmailOAuth().getAccountEmail();
       out.push({ type: "gmail_oauth", email: email || undefined });
+    }
+    for (const a of cfg.cfmail.accounts) {
+      if (await mgr.getCfMail().hasJwt(a.email)) out.push({ type: "cfmail", email: a.email });
     }
     return out;
   }
