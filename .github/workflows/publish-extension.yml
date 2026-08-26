@@ -1,0 +1,248 @@
+name: Publish extension to Chrome Web Store
+
+# Publishes the extension whenever the version in chrome-extension/manifest.json
+# changes on main. Any other change to the extension is a no-op: the version bump
+# IS the release trigger, so shipping is one line in a normal PR.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   CWS_CLIENT_ID      OAuth 2.0 client ID     (Google Cloud console)
+#   CWS_CLIENT_SECRET  OAuth 2.0 client secret
+#   CWS_REFRESH_TOKEN  refresh token with scope https://www.googleapis.com/auth/chromewebstore
+#
+# The publisher account must have 2-Step Verification enabled, or the API
+# rejects updates to an existing item.
+#
+# Heads-up: Google expires a refresh token that has gone unused for six months.
+# If publishing suddenly fails with invalid_grant, mint a new one and update the
+# secret — nothing else needs to change.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "chrome-extension/manifest.json"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Submit for review after uploading (uncheck to leave it as a draft)"
+        type: boolean
+        default: true
+
+# Never let two publishes race: the store keeps a single draft per item, so a
+# second upload would clobber the first one mid-flight.
+concurrency:
+  group: cws-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Public information — it is in the Web Store URL. Not a secret.
+  EXTENSION_ID: kidhdmkendlfkblailmonmpahjaljpai
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Forks have no credentials, and should not try to publish someone else's item.
+    if: github.repository == 'priority3/email-otp-autofill'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need the previous commit to tell a version bump from any other edit.
+          fetch-depth: 2
+
+      - name: Detect version change
+        id: version
+        run: |
+          set -euo pipefail
+          MANIFEST=chrome-extension/manifest.json
+          NEW=$(node -p "require('./$MANIFEST').version")
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual run — publishing $NEW regardless of history."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # git show fails on the very first commit; treat that as "new".
+          if OLD_JSON=$(git show "HEAD^:$MANIFEST" 2>/dev/null); then
+            OLD=$(printf '%s' "$OLD_JSON" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          else
+            OLD=""
+          fi
+
+          echo "previous: ${OLD:-<none>}"
+          echo "current : $NEW"
+          if [ "$OLD" = "$NEW" ]; then
+            echo "Version unchanged — nothing to publish."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Check credentials are configured
+        if: steps.version.outputs.changed == 'true'
+        env:
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "$CLIENT_ID" ] || missing="$missing CWS_CLIENT_ID"
+          [ -n "$CLIENT_SECRET" ] || missing="$missing CWS_CLIENT_SECRET"
+          [ -n "$REFRESH_TOKEN" ] || missing="$missing CWS_REFRESH_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing"
+            exit 1
+          fi
+
+      # Cheap gate before shipping to users. There is no extension test suite, but
+      # a syntax error or malformed manifest is exactly the class of mistake that
+      # must not reach the store.
+      - name: Validate package
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          cd chrome-extension
+          for f in *.js; do node --check "$f"; done
+          node -e "
+            const m = require('./manifest.json');
+            if (!/^\d+(\.\d+){0,3}\$/.test(m.version)) throw new Error('bad version: ' + m.version);
+            if (m.description.length > 132) throw new Error('description exceeds the store limit of 132 chars');
+            for (const p of Object.values(m.icons)) require('fs').accessSync(p);
+            for (const p of Object.values(m.action.default_icon)) require('fs').accessSync(p);
+            console.log('manifest OK — version ' + m.version);
+          "
+
+      - name: Build package
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ext && mkdir -p /tmp/ext
+          cp -R chrome-extension/. /tmp/ext/
+
+          # Strip manifest.key. It only exists to pin a stable extension ID when
+          # loading unpacked; the store derives the published ID from its own key
+          # and this repo's key does not match the published item. Leaving it in
+          # is at best noise and at worst an upload rejection.
+          node -e "
+            const fs = require('fs');
+            const p = '/tmp/ext/manifest.json';
+            const m = JSON.parse(fs.readFileSync(p, 'utf8'));
+            delete m.key;
+            fs.writeFileSync(p, JSON.stringify(m, null, 2) + '\n');
+            console.log('stripped manifest.key for the store package');
+          "
+
+          cd /tmp/ext
+          zip -r "$GITHUB_WORKSPACE/extension.zip" . \
+            -x "*.git*" -x "*node_modules*" -x "*dist*" -x "*.DS_Store"
+
+          cd "$GITHUB_WORKSPACE"
+          echo "--- package contents ---"
+          unzip -l extension.zip
+          # manifest.json must sit at the archive root or the store rejects it.
+          unzip -l extension.zip | grep -qE ' manifest\.json$' \
+            || { echo "::error::manifest.json is not at the zip root"; exit 1; }
+
+      - name: Get access token
+        if: steps.version.outputs.changed == 'true'
+        id: token
+        env:
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+          RESP=$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            -d "client_id=$CLIENT_ID" \
+            -d "client_secret=$CLIENT_SECRET" \
+            -d "refresh_token=$REFRESH_TOKEN" \
+            -d "grant_type=refresh_token")
+
+          TOKEN=$(printf '%s' "$RESP" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token || ''")
+          if [ -z "$TOKEN" ]; then
+            # Print only the error fields — the body can echo credentials back.
+            printf '%s' "$RESP" | node -p "
+              const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
+              'error: ' + (d.error || '?') + ' — ' + (d.error_description || '')
+            "
+            echo "::error::Could not exchange the refresh token. If this says invalid_grant, the token was revoked or has gone unused for six months — mint a new one."
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Upload package
+        if: steps.version.outputs.changed == 'true'
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          RESP=$(curl -sS -X PUT \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-goog-api-version: 2" \
+            -T extension.zip \
+            "https://www.googleapis.com/upload/chromewebstore/v1.1/items/$EXTENSION_ID")
+          echo "$RESP"
+
+          STATE=$(printf '%s' "$RESP" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).uploadState || 'UNKNOWN'")
+          if [ "$STATE" != "SUCCESS" ]; then
+            printf '%s' "$RESP" | node -p "
+              const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
+              (d.itemError || []).map(e => e.error_code + ': ' + e.error_detail).join('\n') || 'no itemError detail'
+            "
+            echo "::error::Upload failed with uploadState=$STATE"
+            exit 1
+          fi
+          echo "Uploaded version ${{ steps.version.outputs.version }} as a draft."
+
+      - name: Submit for review
+        if: steps.version.outputs.changed == 'true' && (github.event_name == 'push' || inputs.publish)
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          RESP=$(curl -sS -X POST \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-goog-api-version: 2" \
+            -H "Content-Length: 0" \
+            "https://www.googleapis.com/chromewebstore/v1.1/items/$EXTENSION_ID/publish")
+          echo "$RESP"
+
+          # ITEM_PENDING_REVIEW is the normal outcome for an update — it means the
+          # submission was accepted and is queued, NOT that something went wrong.
+          printf '%s' "$RESP" | node -e "
+            const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            const status = d.status || [];
+            const detail = (d.statusDetail || []).join(' | ');
+            const ok = ['OK', 'ITEM_PENDING_REVIEW'];
+            console.log('status: ' + status.join(', ') + (detail ? ' — ' + detail : ''));
+            if (!status.length || !status.every(s => ok.includes(s))) {
+              console.log('::error::Publish rejected: ' + status.join(', ') + ' — ' + detail);
+              process.exit(1);
+            }
+          "
+
+      - name: Summary
+        if: always() && steps.version.outputs.changed == 'true'
+        run: |
+          {
+            echo "### Chrome Web Store"
+            echo ""
+            echo "- version: \`${{ steps.version.outputs.version }}\`"
+            echo "- item: [\`$EXTENSION_ID\`](https://chrome.google.com/webstore/devconsole/)"
+            echo "- review usually takes a few hours to a few days; the store emails the outcome"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the built package
+        if: steps.version.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-${{ steps.version.outputs.version }}
+          path: extension.zip
