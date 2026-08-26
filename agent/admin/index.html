@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Inlined as a data URI: /admin is served by a single res.sendFile()
+         with no static mount beside it, so a relative icon href would 404. -->
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACxElEQVR4nFVTTU8UQRB91T0zu3wjsnyEJSoRUSCIJAIHE6OJN2L0sFEIckBi4k3/gCdPesEfYGJE5ApHo0clwagEYxCRaBB3ZVk+dtkFdmenu033LIiVrpmeSvebqlevCL4xAJKI0NNzpUoHRIkgHDK+w5V+z8y83lRK/buDwqappXPA8/L3JRAmTow4BxEMiFJQSggooSQDog63RpcW517ou6QPNDV33Mx5+QmpJMjiYAUnprEBJSWkJ4wrT4ARg8P54M+lL+MUiUT4u5m5WQHVxh1LWLZtMdvyAXgBQBQA8h68fN4Trsc50ULz8fqz1srKSoVQog6MMXdnj0SJpECRBUlSl+ADkAQsILfnQuxkLe7YJKSozWRQyYTwyZKuh47bfVDHyvBreRGr6TVE138b13sdk+FidIz0mUwM0UIQA8ohpa6dcG74KoZfjqLpUg/c9U0wzsA4N/sTF89jeGIUXSPXQDY3d1BqOrCtWTJ8ZlNplFRXYPD5I/Te7Ye7tQ13M4nuOzdwa+wxSkNHkE2mYXqjAWAqA6TQ9QrDet51oVsWefgA9e2noJTEhf5+pDJxuG7OECt1SzVApgCgP3QSGpkRYXsjiYU306huajR/eT85iYbO0yivCx10RbvJIK0DUMhnduGmd1EWqMGWjGP+1VtUhmuNilKxBOraT6I8WIPVzDe4mR1Yjg2dArW29lbF4ssLud29UH1Xi+oauU7MscBtk9yBibxn2J99OqViH+YpUFy0Ud1Yd8Zqa2tMRWM/4tyxjv75+FVMTX+2fBUS9Gz4UlZQUhkxWY7t8aDDlZBrl3l30pyoqQkP7GWz4xLSly/pZR4FJfllmiUlGBiCgcBQIhEdOximUKhhKJvL3lNQDcqP7SegafAFaaaPYsFA4EkiEXt2MEyHx7m5uataytR/o7xvjFWope+f1qWPqM+ov7TjXSqZbP1jAAAAAElFTkSuQmCC" />
     <title>OTP Agent · 管理端</title>
     <style>
       :root {

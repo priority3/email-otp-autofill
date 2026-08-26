@@ -87,16 +87,16 @@ main {
   min-width: 0;
 }
 
+/* The real product icon (icons/icon32.png), not an emoji. It ships its own dark
+   rounded-square backplate, so no tinted background or border here — those
+   would read as a second plate around the first. The glow is kept because it
+   is the design's signature and sits outside the artwork. */
 .brand-logo {
   flex: none;
   width: 30px;
   height: 30px;
-  display: grid;
-  place-items: center;
   border-radius: 9px;
-  font-size: 16px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-glow);
+  object-fit: contain;
   box-shadow: 0 0 16px var(--accent-soft);
 }
 
