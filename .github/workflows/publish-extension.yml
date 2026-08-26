@@ -4,17 +4,25 @@ name: Publish extension to Chrome Web Store
 # changes on main. Any other change to the extension is a no-op: the version bump
 # IS the release trigger, so shipping is one line in a normal PR.
 #
-# Required repository secrets (Settings → Secrets and variables → Actions):
-#   CWS_CLIENT_ID      OAuth 2.0 client ID     (Google Cloud console)
-#   CWS_CLIENT_SECRET  OAuth 2.0 client secret
-#   CWS_REFRESH_TOKEN  refresh token with scope https://www.googleapis.com/auth/chromewebstore
+# Required repository secret (Settings → Secrets and variables → Actions):
+#   CWS_SERVICE_ACCOUNT_KEY   the full JSON key file of a Google Cloud service
+#                             account, pasted verbatim
+#
+# Setup (https://developer.chrome.com/docs/webstore/service-accounts):
+#   1. Enable the Chrome Web Store API in a Google Cloud project
+#   2. Create a service account — it needs NO IAM roles
+#   3. Create a JSON key for it and paste the file into the secret above
+#   4. Add the service account's email under Account in the Developer Dashboard.
+#      A publisher can currently have only ONE service account, so do not
+#      replace an existing one without checking what else uses it.
 #
 # The publisher account must have 2-Step Verification enabled, or the API
 # rejects updates to an existing item.
 #
-# Heads-up: Google expires a refresh token that has gone unused for six months.
-# If publishing suddenly fails with invalid_grant, mint a new one and update the
-# secret — nothing else needs to change.
+# Why a service account rather than the refresh-token flow the older docs
+# describe: no six-month expiry to babysit, one secret instead of three, and
+# the documented interactive flow still relies on the OOB redirect that Google
+# has already discontinued.
 
 on:
   push:
@@ -87,19 +95,24 @@ jobs:
       - name: Check credentials are configured
         if: steps.version.outputs.changed == 'true'
         env:
-          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          SA_KEY: ${{ secrets.CWS_SERVICE_ACCOUNT_KEY }}
         run: |
           set -euo pipefail
-          missing=""
-          [ -n "$CLIENT_ID" ] || missing="$missing CWS_CLIENT_ID"
-          [ -n "$CLIENT_SECRET" ] || missing="$missing CWS_CLIENT_SECRET"
-          [ -n "$REFRESH_TOKEN" ] || missing="$missing CWS_REFRESH_TOKEN"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secret(s):$missing"
+          if [ -z "${SA_KEY:-}" ]; then
+            echo "::error::Missing repository secret CWS_SERVICE_ACCOUNT_KEY"
             exit 1
           fi
+          # Fail here with a readable message rather than deep inside the signing
+          # step — a truncated or wrong-format paste is the likely mistake.
+          node -e '
+            let key;
+            try { key = JSON.parse(process.env.SA_KEY); }
+            catch { console.log("::error::CWS_SERVICE_ACCOUNT_KEY is not valid JSON — paste the whole key file, including the braces."); process.exit(1); }
+            for (const f of ["client_email", "private_key"]) {
+              if (!key[f]) { console.log("::error::Service account key is missing the " + f + " field."); process.exit(1); }
+            }
+            console.log("service account: " + key.client_email);
+          '
 
       # Cheap gate before shipping to users. There is no extension test suite, but
       # a syntax error or malformed manifest is exactly the class of mistake that
@@ -154,25 +167,41 @@ jobs:
         if: steps.version.outputs.changed == 'true'
         id: token
         env:
-          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
-          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          SA_KEY: ${{ secrets.CWS_SERVICE_ACCOUNT_KEY }}
         run: |
           set -euo pipefail
+
+          # Sign a JWT locally, then trade it for an access token. Node only does
+          # the crypto — the key never leaves this step, and never reaches argv
+          # (which is world-readable in /proc).
+          JWT=$(node -e '
+            const crypto = require("crypto");
+            const key = JSON.parse(process.env.SA_KEY);
+            const enc = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+            const now = Math.floor(Date.now() / 1000);
+            const body = enc({ alg: "RS256", typ: "JWT" }) + "." + enc({
+              iss: key.client_email,
+              scope: "https://www.googleapis.com/auth/chromewebstore",
+              aud: "https://oauth2.googleapis.com/token",
+              iat: now,
+              exp: now + 3600,
+            });
+            const sig = crypto.createSign("RSA-SHA256").update(body).sign(key.private_key).toString("base64url");
+            process.stdout.write(body + "." + sig);
+          ')
+
           RESP=$(curl -sS -X POST https://oauth2.googleapis.com/token \
-            -d "client_id=$CLIENT_ID" \
-            -d "client_secret=$CLIENT_SECRET" \
-            -d "refresh_token=$REFRESH_TOKEN" \
-            -d "grant_type=refresh_token")
+            -d "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer" \
+            --data-urlencode "assertion=$JWT")
 
           TOKEN=$(printf '%s' "$RESP" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).access_token || ''")
           if [ -z "$TOKEN" ]; then
-            # Print only the error fields — the body can echo credentials back.
+            # Print only the error fields — never the whole body.
             printf '%s' "$RESP" | node -p "
               const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
               'error: ' + (d.error || '?') + ' — ' + (d.error_description || '')
             "
-            echo "::error::Could not exchange the refresh token. If this says invalid_grant, the token was revoked or has gone unused for six months — mint a new one."
+            echo "::error::Could not get an access token. invalid_grant usually means the service account has not been added under Account in the Developer Dashboard, or the Chrome Web Store API is not enabled on its Cloud project."
             exit 1
           fi
           echo "::add-mask::$TOKEN"
