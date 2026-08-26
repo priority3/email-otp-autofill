@@ -5,8 +5,6 @@
 从 QQ 邮箱 / Outlook / Gmail 抓取邮箱一次性验证码（OTP），用快捷键自动填充到当前页面——
 通过一个本地 / 自部署的 **agent** 加一个 Chrome（MV3）**扩展** 实现。
 
-> wip: self-hosted……
-
 ## 工作原理
 
 Chrome 扩展轮询一个 **agent** 服务。agent 通过 IMAP / OAuth 连接你的邮箱，提取最新
@@ -45,7 +43,7 @@ Chrome 扩展轮询一个 **agent** 服务。agent 通过 IMAP / OAuth 连接你
 - **多租户**：用户注册并登录；每个账号的邮箱、验证码和密钥彼此隔离（30 天会话，
   SQLite 持久化）。
 - **管理后台**：`/admin`（token 鉴权）——用户 / 邮箱统计、邀请码管理、可选「需邀请码
-  注册」、启用 / 停用用户。
+  注册」、启用 / 停用用户，以及全实例共用的 Outlook / Google OAuth 凭据与 Pub/Sub 受众。
 - **双语 UI**：中 / English，运行时可切换。
 
 ## 当前状态
@@ -74,17 +72,13 @@ Chrome → `chrome://extensions` → 开启开发者模式 → **加载已解压
 > 新邮箱。
 
 - **QQ 邮箱（IMAP）**：登录 [QQ 邮箱网页版](https://mail.qq.com) → 设置 → 账号 → 开启「IMAP/SMTP 服务」→ 按提示短信验证 → 得到 **授权码**（不是登录密码）。把 QQ 邮箱和授权码填入设置页 → `保存 QQ`。
-- **Outlook（OAuth，推荐）**：在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) 新建注册（账户类型选「Personal Microsoft accounts only」）→ Authentication → Add a platform → Mobile and desktop applications → 选择或填写 `https://login.microsoftonline.com/common/oauth2/nativeclient` → 将「Allow public client flows」设为 Yes → 复制 Application (client) ID 填入 → `保存 Client ID` → `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
-- **Gmail（OAuth）**：在 [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials) 创建 OAuth 2.0 客户端 ID（类型选「Web 应用」）→ 记下 Client ID 和 Client Secret → 填入扩展的 Gmail 设置 → `开始登录`，在浏览器完成授权 → 连接自动建立。
+- **Outlook（OAuth，推荐）**：点 `开始登录`，按设备码提示在浏览器完成授权 → `轮询` 确认连接。
+- **Gmail（OAuth）**：点 `开始登录`，在浏览器完成授权 → 连接自动建立。
 
-  **可选：Pub/Sub 推送（生产环境推荐）**——实现零轮询实时获取验证码：
-  1. 在 [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub)
-     创建一个主题（如 `gmail-notifications`）和一个推送订阅，推送地址设为
-     `https://your.domain/v1/gmail/pubsub`。
-  2. 在订阅的推送设置中，将**受众（audience）**设为 agent 的 pubsub 端点 URL。
-  3. 在 agent 管理后台（`/admin`）设置 Google OAuth 凭据和 Pub/Sub 受众，然后在用户的
-     Gmail 设置中配置主题名称。
-  4. agent 会自动注册 Gmail watch（7 天有效期，自动续期）并处理收到的推送通知。
+> **Outlook 与 Gmail 的 OAuth 凭据由管理员按实例配置一次，不是每个用户各配一份。**
+> 扩展里没有 Client ID 输入框。公共实例已经配好了。自建实例请看下面的
+> [配置 OAuth 凭据（自部署）](#配置-oauth-凭据自部署)——在配好之前，扩展会提示用户
+> 「管理员尚未配置，请联系管理员」。
 
 > 已保存的授权码/密码下次打开设置页会以圆点（••••）回填，点字段右侧的**小眼睛**即可查看明文。
 
@@ -134,6 +128,38 @@ docker compose up -d --build
 - **用户**：从扩展「设置」页注册 / 登录，然后把 **Agent Base URL** 指向你的地址。
 - **管理员（你）**：打开 `https://your.domain.tld/admin`，用管理 token 登录，管理邀请
   码、用户并查看统计。需要封闭注册就在那里打开「需邀请码」。
+
+### 配置 OAuth 凭据（自部署）
+
+**想让 Outlook 或 Gmail 可用，这步是必须的。** 这些凭据是全实例共用的：你在
+Microsoft / Google 那边注册一个应用，实例上所有用户都通过它登录，用户自己看不到也不
+需要填 Client ID。在配好之前，连接 Outlook 或 Gmail 会失败并返回 `client_id_not_set` /
+`google_credentials_not_set`，扩展会提示用户联系管理员。QQ 邮箱不需要这一步——它用的是
+每个用户自己的 IMAP 授权码。
+
+全部在 `/admin` → **设置** 里配置：
+
+- **Outlook**——在 [Azure 门户 · 应用注册](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+  新建注册（账户类型选「Personal Microsoft accounts only」）→ Authentication →
+  Add a platform → Mobile and desktop applications → 选择或填写
+  `https://login.microsoftonline.com/common/oauth2/nativeclient` → 将
+  「Allow public client flows」设为 Yes → 把 Application (client) ID 填进
+  **Microsoft App Client ID**。
+- **Gmail**——在 [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials)
+  创建 OAuth 2.0 客户端 ID（类型选「Web 应用」）→ 把 Client ID 与 Client Secret 填进
+  **Google Client ID** / **Google Client Secret**。
+
+**可选：Gmail Pub/Sub 推送**——用实时推送替代轮询：
+
+1. 在 [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub)
+   创建一个主题（如 `gmail-notifications`）和一个推送订阅，推送地址设为
+   `https://your.domain.tld/v1/gmail/pubsub`。
+2. 在订阅的推送设置里，把**受众（audience）**设成同一个 URL。
+3. 在 `/admin` 里把 **Pub/Sub 受众** 设成同一个值。
+4. 之后由每个用户在自己的 Gmail 设置里填主题名称。
+
+agent 会自动注册 Gmail watch（7 天有效期，自动续期）并处理收到的推送。不配 Pub/Sub 会
+回退到轮询，功能一样能用，只是延迟更高、更费 API 配额。
 
 ### 对外暴露
 

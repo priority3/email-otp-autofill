@@ -6,8 +6,6 @@ Fetch email one-time passcodes (OTP) from QQ Mail / Outlook / Gmail and autofill
 into the current page with a hotkey — via a local/self-hosted **agent** plus a
 Chrome (MV3) **extension**.
 
-> wip: self-hosted, ...
-
 ## How it works
 
 The Chrome extension polls an **agent** service. The agent connects to your
@@ -54,7 +52,8 @@ Two ways to connect:
 - **Multi-tenant**: users register and log in; all mailboxes, OTPs and secrets
   are isolated per account (30-day sessions persisted in SQLite).
 - **Admin panel**: `/admin` (token-gated) — user/mailbox stats, invite-code
-  management, optional "invite required" registration, enable/disable users.
+  management, optional "invite required" registration, enable/disable users, and
+  the instance-wide Outlook/Google OAuth credentials and Pub/Sub audience.
 - **Bilingual UI**: 中 / English, switchable at runtime.
 
 ## Status
@@ -92,33 +91,16 @@ Click the extension icon → `Settings`. Confirm the `Agent` status at the top i
   Account → enable "IMAP/SMTP service" → complete the SMS verification → obtain
   an **auth code** (not your login password). Enter the QQ address and auth code
   in Settings → `Save QQ`.
-- **Outlook (OAuth, recommended)**: in the
-  [Azure portal · App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
-  create a new registration (account type "Personal Microsoft accounts only") →
-  Authentication → Add a platform → Mobile and desktop applications → select or
-  enter `https://login.microsoftonline.com/common/oauth2/nativeclient` → set
-  "Allow public client flows" to Yes → copy the Application (client) ID and paste
-  it in → `Save Client ID` → `Start login`, follow the device-code prompt to
-  authorize in your browser → `Poll` to confirm the connection.
-- **Gmail (OAuth)**: in the
-  [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials)
-  create an OAuth 2.0 Client ID (type "Web application") → note the Client ID
-  and Client Secret → paste them in the extension's Gmail settings → `Start
-  Sign-in`, authorize in your browser → the connection is established
-  automatically.
+- **Outlook (OAuth, recommended)**: `Start Sign-in`, follow the device-code
+  prompt to authorize in your browser, then `Poll` to confirm the connection.
+- **Gmail (OAuth)**: `Start Sign-in`, authorize in your browser — the connection
+  is established automatically.
 
-  **Optional: Pub/Sub push (recommended for production)** — for real-time OTP
-  delivery without polling:
-  1. In [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub),
-     create a topic (e.g. `gmail-notifications`) and a push subscription
-     pointing to `https://your.domain/v1/gmail/pubsub`.
-  2. In the subscription's push settings, set the **audience** to your agent's
-     pubsub endpoint URL.
-  3. In the agent's admin panel (`/admin`), set the Google OAuth credentials
-     and Pub/Sub audience, then configure the topic name in the user's Gmail
-     settings.
-  4. The agent will automatically register a Gmail watch (7-day expiration,
-     auto-renewed) and process incoming push notifications.
+> **Outlook and Gmail need OAuth credentials configured once per instance, by
+> the admin — not by each user.** There is no Client ID field in the extension.
+> On the public instance this is already done. If you self-host, see
+> [Configure OAuth credentials](#configure-oauth-credentials-self-host) below;
+> until then the extension will tell users the admin has not configured them yet.
 
 > A saved auth code/password is masked with dots (••••) the next time you open
 > Settings; click the **eye** icon at the right of the field to reveal it.
@@ -179,6 +161,42 @@ docker compose up -d --build
 - **You (admin)**: open `https://your.domain.tld/admin`, sign in with the admin
   token to manage invite codes, users, and view stats. Toggle "invite required"
   there if you want closed signup.
+
+### Configure OAuth credentials (self-host)
+
+**Required if you want Outlook or Gmail to work.** These credentials are
+instance-wide: you register one app with Microsoft / Google, and every user on
+your instance signs in through it. Users never see or enter a Client ID. Until
+this is done, connecting Outlook or Gmail fails with `client_id_not_set` /
+`google_credentials_not_set`, and the extension tells the user to contact the
+admin. QQ Mail needs none of this — it uses a per-user IMAP auth code.
+
+Set all of it in `/admin` → **Settings**:
+
+- **Outlook** — in the
+  [Azure portal · App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade),
+  create a registration (account type "Personal Microsoft accounts only") →
+  Authentication → Add a platform → Mobile and desktop applications → select or
+  enter `https://login.microsoftonline.com/common/oauth2/nativeclient` → set
+  "Allow public client flows" to Yes → copy the Application (client) ID into
+  **Microsoft App Client ID**.
+- **Gmail** — in the
+  [Google Cloud Console · Credentials](https://console.cloud.google.com/apis/credentials),
+  create an OAuth 2.0 Client ID of type "Web application" → copy the Client ID
+  and Client Secret into **Google Client ID** / **Google Client Secret**.
+
+**Optional: Gmail Pub/Sub push** — real-time delivery instead of polling:
+
+1. In [Google Cloud Console · Pub/Sub](https://console.cloud.google.com/cloudpubsub),
+   create a topic (e.g. `gmail-notifications`) and a push subscription pointing
+   at `https://your.domain.tld/v1/gmail/pubsub`.
+2. In the subscription's push settings, set the **audience** to that same URL.
+3. In `/admin`, set **Pub/Sub audience** to the same value.
+4. Each user then sets the topic name in their own Gmail settings.
+
+The agent registers the Gmail watch automatically (7-day expiration,
+auto-renewed) and processes incoming notifications. Without Pub/Sub it falls
+back to polling, which works fine — just with more latency and API quota.
 
 ### Exposing it publicly
 
