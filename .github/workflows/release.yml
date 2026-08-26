@@ -36,7 +36,7 @@ jobs:
         run: |
           cd chrome-extension
           zip -r ../email-otp-autofill-chrome.zip . \
-            -x "*.git*" -x "*node_modules*" -x "*dist*"
+            -x "*.git*" -x "*node_modules*" -x "*dist*" -x "*.DS_Store"
 
       - name: Package firefox extension
         run: |
@@ -67,7 +67,7 @@ jobs:
           "
           cd /tmp/firefox-ext
           zip -r "$GITHUB_WORKSPACE/email-otp-autofill-firefox.zip" . \
-            -x "*.git*" -x "*node_modules*" -x "*dist*"
+            -x "*.git*" -x "*node_modules*" -x "*dist*" -x "*.DS_Store"
 
       - name: Package agent
         run: |
