@@ -260,7 +260,12 @@ export class ImapOtpWatcher {
         } catch (e) {
           this.lastError = e instanceof Error ? e.message : String(e);
           if (!this.running) break;
-          // Some servers close IDLE periodically; reconnect.
+          // Reason: a drop that we recover from leaves no trace otherwise, so
+          // there is no way to learn WHY connections keep dying. One line per
+          // drop is cheap and is the only evidence we get.
+          console.warn(
+            `[otp-agent] imap ${this.opts.auth.user} idle dropped: ${this.lastError}; reconnecting`
+          );
           await this.safeReconnect();
         }
       }
