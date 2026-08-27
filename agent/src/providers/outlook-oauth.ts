@@ -5,6 +5,7 @@ import { proxyFetch } from "../http/proxy-fetch.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getOutlookClientId } from "../storage/settings.js";
 import { HEALTHY, healthFromFailure, type AuthHealth } from "./auth-health.js";
+import { PollLogger } from "./poll-log.js";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -108,12 +109,23 @@ export class OutlookOAuthProvider {
   private noteAuthFailure(status: number, body: string): void {
     const health = healthFromFailure(status, body);
     // Escalate only; a transient blip must not clear a real warning.
-    if (health.needsReauth) this.authHealth = health;
+    if (health.needsReauth) {
+      // Stated plainly: this is the one failure the user must act on, and it is
+      // also the one that otherwise looks identical to "no mail arrived".
+      if (!this.authHealth.needsReauth) {
+        console.error(`${this.logLabel} needs re-authorizing (${health.code}) — no codes will arrive until then`);
+      }
+      this.authHealth = health;
+    }
   }
   private includeSpam = false;
   private pollIntervalMs = 0;
 
   private deviceCode: { value: string; intervalSec: number; expiresAt: number } | null = null;
+
+  // Short user prefix so one tenant's fault is distinguishable in a shared log.
+  private readonly logLabel: string;
+  private readonly log: PollLogger;
 
   constructor(store: OtpStore, userId: string = "local") {
     this.store = store;
@@ -121,6 +133,8 @@ export class OutlookOAuthProvider {
     // Per-user refresh-token key so multi-tenant users don't share OAuth state.
     this.refreshKey = scopedKey(userId, "outlook_oauth:refresh");
     this.accountEmailKey = scopedKey(userId, "outlook_oauth:email");
+    this.logLabel = `[outlook-poll ${userId.slice(0, 8)}]`;
+    this.log = new PollLogger(this.logLabel);
   }
 
   // Instance-wide client ID set by the admin; shared by every user's sign-in.
@@ -227,12 +241,25 @@ export class OutlookOAuthProvider {
     this.pollIntervalMs = pollIntervalMs;
     if (this.running) {
       if (this.pollTimer) clearInterval(this.pollTimer);
-      this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), this.pollIntervalMs);
+      this.pollTimer = setInterval(() => void this.runPoll(), this.pollIntervalMs);
       return;
     }
     this.running = true;
-    this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), this.pollIntervalMs);
-    void this.pollOnce().catch(() => {});
+    this.pollTimer = setInterval(() => void this.runPoll(), this.pollIntervalMs);
+    void this.runPoll();
+  }
+
+  /*
+   * pollOnce already handles its own errors; this only catches a throw from
+   * outside that try block (e.g. the Keychain read). It used to be
+   * `.catch(() => {})`, which discarded exactly the failures nothing else logs.
+   */
+  private async runPoll(): Promise<void> {
+    try {
+      await this.pollOnce();
+    } catch (e) {
+      this.lastError = this.log.fail(e);
+    }
   }
 
   stop() {
@@ -298,9 +325,18 @@ export class OutlookOAuthProvider {
   }
 
   private async pollOnce(): Promise<void> {
-    if (!this.clientId) return;
+    // These two are configuration states, not faults — say so once, then stay
+    // quiet. Previously both returned in total silence, which is why a mailbox
+    // that was never connected looked the same as one that was working.
+    if (!this.clientId) {
+      this.log.note("skipped: no Outlook client id configured on this instance");
+      return;
+    }
     const has = await this.hasRefreshToken();
-    if (!has) return;
+    if (!has) {
+      this.log.note("skipped: mailbox not connected (no refresh token)");
+      return;
+    }
     try {
       const token = await this.ensureAccessToken();
       const now = Date.now();
@@ -354,8 +390,9 @@ export class OutlookOAuthProvider {
       }
       this.lastError = null;
       this.lastPollAt = Date.now();
+      this.log.ok();
     } catch (e) {
-      this.lastError = String((e as any)?.message || e);
+      this.lastError = this.log.fail(e);
     }
   }
 }
