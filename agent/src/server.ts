@@ -196,10 +196,18 @@ export async function startServer() {
     const mgr = await registry.getOrCreate(userId);
     const cfg = mgr.config;
     const qqAccounts = await Promise.all(
-      cfg.qq.accounts.map(async (a) => ({
-        email: a.email,
-        configured: Boolean(await secretGet(mgr.secretKeyFor("qq", a.email))),
-      }))
+      cfg.qq.accounts.map(async (a) => {
+        // `configured` only says a credential is stored. `online` says the IMAP
+        // watcher is actually connected — the two diverge when a connection
+        // drops, and the UI needs to show that rather than a reassuring dot.
+        const watcher = mgr.qqStatus(a.email);
+        return {
+          email: a.email,
+          configured: Boolean(await secretGet(mgr.secretKeyFor("qq", a.email))),
+          online: watcher?.online ?? false,
+          lastError: watcher?.lastError ?? null,
+        };
+      })
     );
     const outlookOauthConnected = await mgr.getOutlookOAuth().hasRefreshToken();
     const outlookOauthEmail = outlookOauthConnected ? await mgr.getOutlookOAuth().getAccountEmail() : null;
