@@ -55,7 +55,24 @@ const KEYWORD_CODE_GAP = String.raw`(?:[^A-Za-z0-9]{0,24}(?:\b${CONNECTOR_WORDS}
 // welds an ordinary word to an adjacent number — "email otp autofill" + "85% off"
 // became the code "autofill85". Space-separated *digit* groups ("123 456") are
 // still handled by the separated_digits pass.
-const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){2,18}[A-Za-z0-9])`;
+const ALNUM_CODE_PATTERN = String.raw`([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){2,34}[A-Za-z0-9])`;
+
+/*
+ * Length ceilings for mixed letter+digit codes, per pass.
+ *
+ * Sites increasingly mail an opaque hex token rather than 6 digits — NodeSeek
+ * sends a 24-char one ("...你的验证码是7a38ff0ab00ff1780989bfe0"). The old
+ * ceiling of 10 dropped it outright, and with the real code gone the extractor
+ * fell back to an unrelated 8-digit number elsewhere in the HTML: the user was
+ * shown a confidently wrong code, which is worse than showing none.
+ *
+ * The ceiling is raised only where a keyword sits right next to the token. A
+ * long hex run on its own is far more likely to be an id than a code, so the
+ * keyword-free and standalone-line passes keep the strict limit.
+ */
+const ALNUM_MAX_NEAR_KEYWORD = 36;
+const ALNUM_MAX_STANDALONE = 10;
+
 
 function normalize(s: string): string {
   return s
@@ -123,11 +140,16 @@ function isNumericFragment(text: string, start: number, matched: string): boolea
   return false;
 }
 
-function isCodeShape(code: string, allowAlnum: boolean): boolean {
+/*
+ * `alnumMax` is both the switch and the ceiling for mixed letter+digit codes:
+ * 0 means digits only. Pure-digit codes keep their own 4–8 range regardless,
+ * since a long digit run is an account or order number, never an OTP.
+ */
+function isCodeShape(code: string, alnumMax: number): boolean {
   if (!/^[A-Za-z0-9]+$/.test(code)) return false;
   if (/^\d+$/.test(code)) return code.length >= 4 && code.length <= 8;
-  if (!allowAlnum) return false;
-  return code.length >= 4 && code.length <= 10 && /[A-Za-z]/.test(code) && /\d/.test(code);
+  if (alnumMax <= 0) return false;
+  return code.length >= 4 && code.length <= alnumMax && /[A-Za-z]/.test(code) && /\d/.test(code);
 }
 
 export function extractOtpCandidates(raw: string): OtpCandidate[] {
@@ -139,9 +161,9 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
   // when no keyword is near, and keep it only as a weak last resort when one is
   // — so "验证码：2026" still returns 2026 if it's the lone candidate, but a real
   // code always outranks a stray copyright/date year.
-  const push = (rawCode: string, baseScore: number, reason: string, boost: number, allowAlnum = false) => {
+  const push = (rawCode: string, baseScore: number, reason: string, boost: number, alnumMax = 0) => {
     const code = normalizeCandidate(rawCode);
-    if (!isCodeShape(code, allowAlnum)) return;
+    if (!isCodeShape(code, alnumMax)) return;
     if (looksLikeYear(code)) {
       if (boost === 0) return;
       candidates.push({ code, score: 2, reason });
@@ -157,13 +179,13 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
   // contexts; global alphanumeric scanning would pick up URL tokens too often.
   const alnumAfterKeyword = new RegExp(String.raw`(?:${KEYWORD_ALT})${KEYWORD_CODE_GAP}${ALNUM_CODE_PATTERN}`, "gi");
   while ((m = alnumAfterKeyword.exec(text))) {
-    push(m[1]!, 13, "near_keyword_alnum", keywordBoost(m[0]!), true);
+    push(m[1]!, 13, "near_keyword_alnum", keywordBoost(m[0]!), ALNUM_MAX_NEAR_KEYWORD);
   }
 
   // Alphanumeric codes right before a keyword: "A1B2C3 is your verification code".
-  const alnumBeforeKeyword = new RegExp(String.raw`\b([A-Za-z0-9][A-Za-z0-9-]{2,18}[A-Za-z0-9])\b${KEYWORD_CODE_GAP}(?:${KEYWORD_ALT})`, "gi");
+  const alnumBeforeKeyword = new RegExp(String.raw`\b([A-Za-z0-9][A-Za-z0-9-]{2,34}[A-Za-z0-9])\b${KEYWORD_CODE_GAP}(?:${KEYWORD_ALT})`, "gi");
   while ((m = alnumBeforeKeyword.exec(text))) {
-    push(m[1]!, 12, "near_keyword_alnum", keywordBoost(m[0]!), true);
+    push(m[1]!, 12, "near_keyword_alnum", keywordBoost(m[0]!), ALNUM_MAX_NEAR_KEYWORD);
   }
 
   // Digits right after a keyword: "验证码：123456".
@@ -192,19 +214,36 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
   // nothing on true positives.
   const hasCodeContext = SOFT_CUE.test(text) || KEYWORDS.some((re) => re.test(text));
   if (hasCodeContext) {
+    /*
+     * Both passes additionally require a keyword *near the number itself*, not
+     * merely somewhere in the mail.
+     *
+     * Reason: these two are the only passes that will match an arbitrary number,
+     * so without this they turn "the mail mentions a code" into "any number in
+     * the mail is the code". A NodeSeek mail whose real code was a 24-char hex
+     * token — too long to match at the time — still contained an unrelated
+     * 8-digit number in its HTML, and that number was surfaced as the code:
+     * confidently wrong, which costs the user more than an empty result.
+     *
+     * A number with no keyword beside it is not evidence of anything. Returning
+     * nothing is the correct answer.
+     */
     while ((m = separatedDigits.exec(text))) {
       const joined = (m[1] || "").replace(/\D/g, "");
       if (joined.length < 4 || joined.length > 8) continue;
       if (isNumericFragment(text, m.index, m[0]!)) continue;
-      // Avoid promoting generic numbers too much.
       const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
-      push(joined, 4, "separated_digits", keywordBoost(ctx));
+      const boost = keywordBoost(ctx);
+      if (boost === 0) continue;
+      push(joined, 4, "separated_digits", boost);
     }
 
     while ((m = plain.exec(text))) {
       if (isNumericFragment(text, m.index, m[0]!)) continue;
       const ctx = text.slice(Math.max(0, m.index - 24), Math.min(text.length, m.index + 48));
-      push(m[1]!, 2, "plain_digits", keywordBoost(ctx));
+      const boost = keywordBoost(ctx);
+      if (boost === 0) continue;
+      push(m[1]!, 2, "plain_digits", boost);
     }
   }
 
@@ -223,7 +262,7 @@ export function extractOtpCandidates(raw: string): OtpCandidate[] {
       // covered by the plain/separated passes, which score them on context.
       const code = normalizeCandidate(m[1]!);
       if (!/[A-Za-z]/.test(code) || !/\d/.test(code)) continue;
-      push(m[1]!, 11, "standalone_line_alnum", 3, true);
+      push(m[1]!, 11, "standalone_line_alnum", 3, ALNUM_MAX_STANDALONE);
     }
   }
 
