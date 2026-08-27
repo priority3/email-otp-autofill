@@ -380,7 +380,11 @@ export class GmailOAuthProvider {
 
     this.seenIds.add(id);
     if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
-    console.log(`[gmail-pubsub] message: ${subject} | OTP: ${best ? best.code : "none"}`);
+    // Reason: this used to print the subject and the extracted code. Docker
+    // logs are readable by anyone with server access, and on a multi-tenant
+    // instance that is other people's mail and other people's OTPs. The Gmail
+    // message id is enough to correlate without carrying any content.
+    console.log(`[gmail-pubsub] processed ${id}: otp=${best ? "yes" : "no"}`);
     if (!best) return;
 
     this.store.add({
@@ -613,7 +617,10 @@ export class GmailOAuthProvider {
 
         const listJson = (await listRes.json()) as { messages?: Array<{ id?: string }> };
         const messages = Array.isArray(listJson.messages) ? listJson.messages : [];
-        console.log(`[gmail-poll] found ${messages.length} unread messages (${query})`);
+        // Reason: this line used to run on every poll of every query — with a
+        // 5s interval that is ~87k lines a day of constant text, which buried
+        // the failures that actually matter. Whether the poller is healthy is
+        // already answerable from lastPollAt / lastError.
         const now = Date.now();
 
         for (const msgRef of messages) {
@@ -650,7 +657,8 @@ export class GmailOAuthProvider {
 
           this.seenIds.add(id);
           if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
-          console.log(`[gmail-poll] message: ${subject} | OTP: ${best ? best.code : "none"}`);
+          // See the matching note in the Pub/Sub path: no subject, no code.
+          console.log(`[gmail-poll] processed ${id}: otp=${best ? "yes" : "no"}`);
           if (!best) continue;
 
           this.store.add({
