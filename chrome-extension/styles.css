@@ -817,6 +817,13 @@ input.input-error:focus {
   box-shadow: 0 0 7px rgba(88, 224, 143, 0.7);
 }
 
+/* Credential is stored but the mailbox connection is down — the account will
+   silently receive nothing, so it must not look the same as a healthy one. */
+.nav-dot.warn {
+  background: var(--danger);
+  box-shadow: 0 0 7px rgba(255, 122, 122, 0.7);
+}
+
 .nav-add {
   margin-top: 6px;
   color: var(--accent);
