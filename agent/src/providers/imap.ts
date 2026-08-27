@@ -155,13 +155,35 @@ export class ImapOtpWatcher {
 
   constructor(opts: ImapProviderOptions) {
     this.opts = opts;
-    this.client = new ImapFlow({
-      host: opts.host,
-      port: opts.port,
-      secure: opts.secure,
-      auth: { user: opts.auth.user, pass: opts.auth.pass },
+    this.client = this.createClient();
+  }
+
+  /*
+   * A fresh ImapFlow per connection attempt.
+   *
+   * Reason: ImapFlow refuses to reconnect an instance that has already logged
+   * out — it throws "Can not re-use ImapFlow instance". Reusing one meant the
+   * first IDLE drop (QQ cycles IDLE roughly every half hour) killed the watcher
+   * for good, silently, until the process restarted.
+   *
+   * Listeners are attached here rather than in start(), so every replacement
+   * client gets them.
+   */
+  private createClient(): ImapFlow {
+    const client = new ImapFlow({
+      host: this.opts.host,
+      port: this.opts.port,
+      secure: this.opts.secure,
+      auth: { user: this.opts.auth.user, pass: this.opts.auth.pass },
       logger: false,
     });
+    client.on("error", (err) => {
+      this.lastError = err instanceof Error ? err.message : String(err);
+    });
+    client.on("exists", () => {
+      this.queueFetchLatest();
+    });
+    return client;
   }
 
   status() {
@@ -223,15 +245,11 @@ export class ImapOtpWatcher {
     if (this.running) return;
     this.running = true;
 
-      this.client.on("error", (err) => {
-        this.lastError = err instanceof Error ? err.message : String(err);
-      });
-
-      this.client.on("exists", () => {
-        this.queueFetchLatest();
-      });
-
     try {
+      // Always begin from a fresh instance. The one the constructor made (which
+      // exists so stop()/status() are safe before the first start) may already
+      // be spent, and ImapFlow refuses to reconnect a spent instance.
+      this.client = this.createClient();
       await this.client.connect();
       await this.fetchLatest(); // initial quick scan
       this.startHeartbeat();
@@ -241,11 +259,23 @@ export class ImapOtpWatcher {
           await this.client.idle();
         } catch (e) {
           this.lastError = e instanceof Error ? e.message : String(e);
+          if (!this.running) break;
           // Some servers close IDLE periodically; reconnect.
           await this.safeReconnect();
         }
       }
+    } catch (e) {
+      // Reason: a failure in the initial connect (or in a reconnect) escapes
+      // straight out of start(). Without recording it here, status() reports
+      // "offline" with no explanation — which is the one thing the UI needs.
+      this.lastError = e instanceof Error ? e.message : String(e);
+      throw e;
     } finally {
+      // Reason: `running` is what status() reports and what the queued tasks
+      // check. Leaving it true after start() settles made a dead watcher look
+      // alive to everything that asked.
+      this.running = false;
+      this.stopHeartbeat();
       await this.safeLogout();
     }
   }
@@ -261,13 +291,15 @@ export class ImapOtpWatcher {
   }
 
   private async safeReconnect(): Promise<void> {
-    try {
-      await this.safeLogout();
-    } catch {
-      // ignore
-    }
+    // Discard the old connection AND the old instance — see createClient().
+    await this.safeLogout();
     if (!this.running) return;
+    this.client = this.createClient();
     await this.client.connect();
+    // Folder discovery is per-connection: a lock failure earlier may have
+    // pruned a junk folder that exists again on the new connection.
+    this.junkFolders = null;
+    await this.fetchLatest();
   }
 
   private async safeLogout(): Promise<void> {

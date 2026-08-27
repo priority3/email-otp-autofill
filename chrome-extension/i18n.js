@@ -64,6 +64,8 @@
       save_account: "Save account",
       account_email: "Email",
       empty_accounts: "No accounts yet.",
+      account_offline: "Offline — the agent is not connected to this mailbox, so no codes will arrive. It retries automatically.",
+      account_offline_with: "Offline — {err}. The agent retries automatically.",
 
       // --- multi-tenant auth ---
       login: "Log in",
@@ -211,6 +213,8 @@
       save_account: "保存账号",
       account_email: "邮箱",
       empty_accounts: "暂无账号。",
+      account_offline: "离线——agent 未连上这个邮箱，收不到任何验证码。会自动重试。",
+      account_offline_with: "离线——{err}。agent 会自动重试。",
 
       // --- multi-tenant auth ---
       login: "登录",
