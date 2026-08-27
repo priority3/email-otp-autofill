@@ -146,7 +146,11 @@ function renderAccountList() {
     const offline = acc.configured && acc.online === false;
     dot.className = "nav-dot" + (acc.configured && !offline ? " ok" : "") + (offline ? " warn" : "");
     if (offline) {
-      dot.title = acc.lastError ? T("account_offline_with", { err: acc.lastError }) : T("account_offline");
+      dot.title = acc.needsReauth
+        ? reauthReasonText(acc.reauthCode)
+        : acc.lastError
+          ? T("account_offline_with", { err: acc.lastError })
+          : T("account_offline");
     }
 
     btn.append(ic, label, dot);
@@ -270,13 +274,38 @@ function toggleGmailActions(connected) {
   }
 }
 
+// Map a re-auth code to a sentence the user can act on. Unknown codes fall back
+// to the generic wording rather than showing a raw machine string.
+function reauthReasonText(code) {
+  const key = { scope_insufficient: "reauth_scope", token_revoked: "reauth_revoked", unauthorized: "reauth_unauthorized" }[code];
+  return T(key || "reauth_generic");
+}
+
+// The connection line. "Connected" is a lie once the grant stops working, so
+// needsReauth takes precedence over it.
+function oauthStateText(connected, needsReauth, code, clientIdSet, noClientKey) {
+  // Short label only — the banner right below carries the reason and the
+  // action, and repeating it in both places just reads as noise.
+  if (connected && needsReauth) return T("oauth_needs_reauth");
+  if (connected) return T("oauth_connected");
+  return T(clientIdSet ? "oauth_not_connected" : noClientKey);
+}
+
+function renderReauthBanner(id, needsReauth, code) {
+  const el = $(id);
+  if (!el) return;
+  el.hidden = !needsReauth;
+  if (needsReauth) setMsg(id + "Text", reauthReasonText(code));
+}
+
 async function refreshOutlookOAuthState() {
   try {
     const r = await bg({ type: "BG_AGENT_STATUS" });
     if (r && r.ok && r.status && r.status.config) {
       const ol = r.status.config.outlook || {};
       const connected = !!ol.oauthConnected;
-      setMsg("outlookState", T(connected ? "oauth_connected" : (ol.clientIdSet ? "oauth_not_connected" : "oauth_no_client_id")));
+      setMsg("outlookState", oauthStateText(connected, !!ol.needsReauth, ol.reauthCode, ol.clientIdSet, "oauth_no_client_id"));
+      renderReauthBanner("outlookReauth", !!ol.needsReauth, ol.reauthCode);
       // Toggle action groups: Start/Clear when disconnected, Disconnect when connected.
       toggleOutlookActions(connected);
     }
@@ -291,7 +320,8 @@ async function refreshGmailOAuthState() {
     if (r && r.ok && r.status && r.status.config) {
       const gm = r.status.config.gmail || {};
       const connected = !!gm.oauthConnected;
-      setMsg("gmailState", T(connected ? "oauth_connected" : (gm.clientIdSet ? "oauth_not_connected" : "gmail_no_client_id")));
+      setMsg("gmailState", oauthStateText(connected, !!gm.needsReauth, gm.reauthCode, gm.clientIdSet, "gmail_no_client_id"));
+      renderReauthBanner("gmailReauth", !!gm.needsReauth, gm.reauthCode);
       // Clear any stale "starting…" left over from a prior auth attempt.
       setMsg("gmailDeviceCodeMsg", "");
       toggleGmailActions(connected);
@@ -585,12 +615,28 @@ async function refreshStatus() {
     // Outlook OAuth is a single account (no email in list, just the type).
     const ol = cfg.outlook || {};
     if (ol.oauthConnected) {
-      next.push({ type: "outlook_oauth", email: ol.oauthEmail || "Outlook OAuth", configured: !!ol.oauthConnected });
+      next.push({
+        type: "outlook_oauth",
+        email: ol.oauthEmail || "Outlook OAuth",
+        configured: !!ol.oauthConnected,
+        // A revoked grant still reports oauthConnected — needsReauth is what
+        // actually says whether mail can still be fetched.
+        online: ol.needsReauth ? false : undefined,
+        needsReauth: !!ol.needsReauth,
+        reauthCode: ol.reauthCode || null
+      });
     }
     // Gmail OAuth is a single account.
     const gm = cfg.gmail || {};
     if (gm.oauthConnected) {
-      next.push({ type: "gmail_oauth", email: gm.oauthEmail || "Gmail OAuth", configured: !!gm.oauthConnected });
+      next.push({
+        type: "gmail_oauth",
+        email: gm.oauthEmail || "Gmail OAuth",
+        configured: !!gm.oauthConnected,
+        online: gm.needsReauth ? false : undefined,
+        needsReauth: !!gm.needsReauth,
+        reauthCode: gm.reauthCode || null
+      });
     }
     accounts = next;
     renderAccountList();
@@ -938,6 +984,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       $(id).classList.remove("input-error");
     });
   }
+
+  // Re-authorizing IS signing in again — reuse the existing flow rather than
+  // duplicating it. The start buttons live in the hidden "disconnected" row,
+  // but a programmatic click works regardless of visibility.
+  $("outlookReauthBtn").addEventListener("click", () => $("outlookAuthStart").click());
+  $("gmailReauthBtn").addEventListener("click", () => $("gmailAuthStart").click());
 
   wireOauth();
   wireGmailOauth();

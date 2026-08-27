@@ -215,6 +215,10 @@ export async function startServer() {
     const gmailOauthConnected = await mgr.getGmailOAuth().hasRefreshToken();
     const gmailOauthEmail = gmailOauthConnected ? await mgr.getGmailOAuth().getAccountEmail() : null;
     const googleClientId = getGoogleClientId();
+    // `oauthConnected` only means a refresh token row exists — it stays true
+    // after the grant is revoked. These say whether the credential still works.
+    const outlookHealth = mgr.getOutlookOAuth().status();
+    const gmailHealth = mgr.getGmailOAuth().status();
     res.json({
       ok: true,
       agent: { host: AGENT_HOST, port: AGENT_PORT },
@@ -231,6 +235,8 @@ export async function startServer() {
           clientIdSet: Boolean(outlookClientId),
           oauthConnected: outlookOauthConnected,
           oauthEmail: outlookOauthEmail,
+          needsReauth: outlookOauthConnected && outlookHealth.needsReauth,
+          reauthCode: outlookOauthConnected ? outlookHealth.reauthCode : null,
         },
         gmail: {
           mode: cfg.gmail.mode,
@@ -238,6 +244,8 @@ export async function startServer() {
           clientIdSet: Boolean(googleClientId) && Boolean(getGoogleClientSecret()),
           oauthConnected: gmailOauthConnected,
           oauthEmail: gmailOauthEmail,
+          needsReauth: gmailOauthConnected && gmailHealth.needsReauth,
+          reauthCode: gmailOauthConnected ? gmailHealth.reauthCode : null,
         },
       },
     });
