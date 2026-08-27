@@ -4,6 +4,7 @@ import { scopedKey } from "../http/auth.js";
 import { proxyFetch } from "../http/proxy-fetch.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getOutlookClientId } from "../storage/settings.js";
+import { HEALTHY, healthFromFailure, type AuthHealth } from "./auth-health.js";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -100,6 +101,15 @@ export class OutlookOAuthProvider {
   private lastError: string | null = null;
   private lastPollAt: number | null = null;
   private seenIds = new Set<string>();
+
+  // Whether Microsoft has told us the stored credential is no longer usable.
+  private authHealth: AuthHealth = HEALTHY;
+
+  private noteAuthFailure(status: number, body: string): void {
+    const health = healthFromFailure(status, body);
+    // Escalate only; a transient blip must not clear a real warning.
+    if (health.needsReauth) this.authHealth = health;
+  }
   private includeSpam = false;
   private pollIntervalMs = 0;
 
@@ -126,6 +136,8 @@ export class OutlookOAuthProvider {
       running: this.running,
       lastError: this.lastError,
       lastPollAt: this.lastPollAt,
+      needsReauth: this.authHealth.needsReauth,
+      reauthCode: this.authHealth.code,
     };
   }
 
@@ -250,11 +262,14 @@ export class OutlookOAuthProvider {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
+      this.noteAuthFailure(res.status, JSON.stringify(json));
       throw new Error(oauthError("refresh_failed", res.status, json));
     }
     const tok = json as TokenResponse;
     if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
+    // A successful refresh proves the credential still works.
+    this.authHealth = HEALTHY;
     return tok.access_token;
   }
 
@@ -297,7 +312,12 @@ export class OutlookOAuthProvider {
         // Reason: must stay proxyFetch — Graph is unreachable without the
         // configured HTTPS_PROXY on networks that need one.
         const res = await proxyFetch(url, { headers: { authorization: `Bearer ${token}` } });
-        if (!res.ok) throw new Error(`graph_list_${folder}_failed:${res.status}`);
+        if (!res.ok) {
+          this.noteAuthFailure(res.status, await res.text().catch(() => ""));
+          throw new Error(`graph_list_${folder}_failed:${res.status}`);
+        }
+        // A completed list proves the credential works; drop any stale warning.
+        this.authHealth = HEALTHY;
         const json = (await res.json()) as { value?: any[] };
         const msgs = Array.isArray(json.value) ? json.value : [];
         for (const msg of msgs) {

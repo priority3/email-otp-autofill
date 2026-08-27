@@ -66,6 +66,13 @@
       empty_accounts: "No accounts yet.",
       account_offline: "Offline — the agent is not connected to this mailbox, so no codes will arrive. It retries automatically.",
       account_offline_with: "Offline — {err}. The agent retries automatically.",
+      oauth_needs_reauth: "Needs re-authorizing",
+      reauth_action: "Re-authorize",
+      reauth_generic: "This mailbox needs to be authorized again — no codes are arriving until you do.",
+      reauth_scope: "The granted permissions no longer cover reading mail. Authorize again to restore it.",
+      reauth_revoked: "Access was revoked or expired. Authorize again to restore it.",
+      reauth_unauthorized: "The saved credential was rejected. Authorize again to restore it.",
+      reauth_popup_notice: "⚠️ {names} needs re-authorizing — no codes are arriving. Click to open Settings.",
 
       // --- multi-tenant auth ---
       login: "Log in",
@@ -215,6 +222,13 @@
       empty_accounts: "暂无账号。",
       account_offline: "离线——agent 未连上这个邮箱，收不到任何验证码。会自动重试。",
       account_offline_with: "离线——{err}。agent 会自动重试。",
+      oauth_needs_reauth: "需要重新授权",
+      reauth_action: "重新授权",
+      reauth_generic: "这个邮箱需要重新授权，在此之前收不到任何验证码。",
+      reauth_scope: "已授予的权限不再包含读取邮件。重新授权即可恢复。",
+      reauth_revoked: "授权已被撤销或过期。重新授权即可恢复。",
+      reauth_unauthorized: "保存的凭据被拒绝。重新授权即可恢复。",
+      reauth_popup_notice: "⚠️ {names} 需要重新授权，当前收不到验证码。点击打开设置页。",
 
       // --- multi-tenant auth ---
       login: "登录",
