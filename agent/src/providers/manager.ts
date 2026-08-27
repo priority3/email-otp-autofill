@@ -7,7 +7,31 @@ import { loadConfig, saveConfig } from "../storage/config.js";
 import { secretDelete, secretGet } from "../storage/secrets.js";
 import { LOCAL_USER_ID, scopedKey } from "../http/auth.js";
 
-type Watcher = { watcher: ImapOtpWatcher; task: Promise<void>; includeSpam: boolean; pollIntervalMs: number };
+type Watcher = {
+  watcher: ImapOtpWatcher;
+  includeSpam: boolean;
+  pollIntervalMs: number;
+  // False once start() settles. A dead entry stays in the map so reconcile can
+  // tell "configured but down" from "not configured".
+  alive: boolean;
+  // Consecutive failed starts, drives the restart backoff.
+  attempt: number;
+  lastError: string | null;
+  retryTimer: NodeJS.Timeout | null;
+};
+
+// Restart backoff for a watcher whose start() rejected: 5s, 10s, 20s, 40s, then
+// capped at 60s. A watcher that stayed up longer than RESET_AFTER_MS is treated
+// as healthy and starts the next failure from zero.
+const RETRY_BASE_MS = 5_000;
+const RETRY_MAX_MS = 60_000;
+const RESET_AFTER_MS = 60_000;
+
+// Exported for tests — the curve is easy to get subtly wrong (off-by-one on the
+// first attempt, or a cap that never bites).
+export function retryDelay(attempt: number): number {
+  return Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS);
+}
 
 export class ProviderManager {
   private store: OtpStore;
@@ -91,10 +115,27 @@ export class ProviderManager {
 
   // Stop all watchers for this user (used when removing a user / shutting down).
   stopAll(): void {
-    for (const [, w] of this.qq) w.watcher.stop();
+    for (const [, w] of this.qq) this.teardown(w);
     this.qq.clear();
     this.outlookOAuth.stop();
     this.gmailOAuth.stop();
+  }
+
+  // Stop a watcher and cancel any pending restart, so a torn-down entry can
+  // never resurrect itself after the account was removed or reconfigured.
+  private teardown(w: Watcher): void {
+    if (w.retryTimer) clearTimeout(w.retryTimer);
+    w.retryTimer = null;
+    w.alive = false;
+    w.watcher.stop();
+  }
+
+  // Read-only view for /v1/status, so the UI can distinguish "credential saved"
+  // from "actually connected".
+  qqStatus(email: string): { online: boolean; lastError: string | null } | null {
+    const w = this.qq.get(email);
+    if (!w) return null;
+    return { online: w.alive && w.watcher.status().running, lastError: w.lastError };
   }
 
   // Diff the configured QQ accounts against running watchers: stop removed ones,
@@ -104,7 +145,7 @@ export class ProviderManager {
 
     for (const [email, w] of this.qq) {
       if (!wanted.has(email)) {
-        w.watcher.stop();
+        this.teardown(w);
         this.qq.delete(email);
       }
     }
@@ -112,37 +153,86 @@ export class ProviderManager {
     for (const { email } of this.config.qq.accounts) {
       const existing = this.qq.get(email);
       if (existing) {
-        if (existing.includeSpam === this.config.includeSpam && existing.pollIntervalMs === this.config.pollIntervalMs) {
-          continue;
-        }
-        existing.watcher.stop();
+        const settingsUnchanged =
+          existing.includeSpam === this.config.includeSpam &&
+          existing.pollIntervalMs === this.config.pollIntervalMs;
+        // Reason: `alive` used to be missing from this check, so a watcher that
+        // had died was indistinguishable from a healthy one and reconcile just
+        // skipped it. The only way back was a process restart.
+        if (settingsUnchanged && (existing.alive || existing.retryTimer)) continue;
+        this.teardown(existing);
         this.qq.delete(email);
       }
-      const pass = await secretGet(this.kcQq(email));
-      if (!pass) continue; // configured but no secret yet — skip until set
-      const watcher = new ImapOtpWatcher({
-        providerId: "qq",
-        userId: this.userId,
-        host: "imap.qq.com",
-        port: 993,
-        secure: true,
-        auth: { user: email, pass },
-        store: this.store,
-        pollIntervalMs: this.config.pollIntervalMs,
-        includeSpam: this.config.includeSpam,
-      });
-      // Reason: a bad credential makes start() reject; swallow it so one broken
-      // account never crashes the agent (critical in multi-tenant).
-      const task = watcher.start().catch((e) => {
-        console.error(`[otp-agent] qq watcher failed for ${email}: ${String((e as any)?.message || e)}`);
-      });
-      this.qq.set(email, {
-        watcher,
-        task,
-        includeSpam: this.config.includeSpam,
-        pollIntervalMs: this.config.pollIntervalMs,
-      });
+      await this.spawnQqWatcher(email, 0);
     }
+  }
+
+  /*
+   * Start one IMAP watcher and supervise it.
+   *
+   * start() resolves only when the watcher is finished — normally never. If it
+   * settles, the connection is gone, so we schedule a restart with backoff
+   * instead of leaving a dead entry behind (which is what used to happen: the
+   * rejection was logged and then nothing).
+   */
+  private async spawnQqWatcher(email: string, attempt: number): Promise<void> {
+    const pass = await secretGet(this.kcQq(email));
+    if (!pass) return; // configured but no secret yet — skip until set
+
+    const watcher = new ImapOtpWatcher({
+      providerId: "qq",
+      userId: this.userId,
+      host: "imap.qq.com",
+      port: 993,
+      secure: true,
+      auth: { user: email, pass },
+      store: this.store,
+      pollIntervalMs: this.config.pollIntervalMs,
+      includeSpam: this.config.includeSpam,
+    });
+
+    const entry: Watcher = {
+      watcher,
+      includeSpam: this.config.includeSpam,
+      pollIntervalMs: this.config.pollIntervalMs,
+      alive: true,
+      attempt,
+      lastError: null,
+      retryTimer: null,
+    };
+    this.qq.set(email, entry);
+
+    const startedAt = Date.now();
+    // Reason: a bad credential makes start() reject; swallowing it keeps one
+    // broken account from taking down the agent (critical in multi-tenant).
+    void watcher
+      .start()
+      .catch((e) => {
+        entry.lastError = String((e as any)?.message || e);
+        console.error(`[otp-agent] qq watcher failed for ${email}: ${entry.lastError}`);
+      })
+      .finally(() => {
+        entry.alive = false;
+        if (!entry.lastError) entry.lastError = watcher.status().lastError;
+
+        // Superseded by a newer entry, or torn down — do not resurrect.
+        if (this.qq.get(email) !== entry) return;
+        if (!this.config.qq.accounts.some((a) => a.email === email)) return;
+
+        // A watcher that stayed up a while was healthy; don't punish it with
+        // the accumulated backoff of long-past failures.
+        const ranMs = Date.now() - startedAt;
+        const nextAttempt = ranMs >= RESET_AFTER_MS ? 0 : entry.attempt + 1;
+        const delay = retryDelay(nextAttempt);
+        console.warn(`[otp-agent] qq watcher for ${email} stopped; retrying in ${Math.round(delay / 1000)}s`);
+
+        entry.retryTimer = setTimeout(() => {
+          entry.retryTimer = null;
+          if (this.qq.get(email) !== entry) return;
+          void this.spawnQqWatcher(email, nextAttempt);
+        }, delay);
+        entry.retryTimer.unref?.();
+      });
   }
 
   // --- account add/remove -------------------------------------------------

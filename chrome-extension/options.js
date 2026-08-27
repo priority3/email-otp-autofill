@@ -139,8 +139,15 @@ function renderAccountList() {
     label.textContent = labelText;
     label.title = labelText;
 
+    // The dot means "receiving mail", not "credential saved". An IMAP account
+    // whose watcher dropped is configured but deaf, and that used to look
+    // identical to a healthy one.
     const dot = document.createElement("span");
-    dot.className = "nav-dot" + (acc.configured ? " ok" : "");
+    const offline = acc.configured && acc.online === false;
+    dot.className = "nav-dot" + (acc.configured && !offline ? " ok" : "") + (offline ? " warn" : "");
+    if (offline) {
+      dot.title = acc.lastError ? T("account_offline_with", { err: acc.lastError }) : T("account_offline");
+    }
 
     btn.append(ic, label, dot);
     btn.addEventListener("click", () => selectAccount(acc));
@@ -564,7 +571,17 @@ async function refreshStatus() {
     // Build the flat account list from qq accounts + outlook oauth.
     const next = [];
     const qq = (cfg.qq && cfg.qq.accounts) || [];
-    for (const a of qq) next.push({ type: "qq", email: a.email, configured: !!a.configured });
+    for (const a of qq) {
+      next.push({
+        type: "qq",
+        email: a.email,
+        configured: !!a.configured,
+        // Older agents don't report these; leave them undefined so the dot
+        // falls back to the previous "configured" meaning.
+        online: a.online,
+        lastError: a.lastError || null
+      });
+    }
     // Outlook OAuth is a single account (no email in list, just the type).
     const ol = cfg.outlook || {};
     if (ol.oauthConnected) {
