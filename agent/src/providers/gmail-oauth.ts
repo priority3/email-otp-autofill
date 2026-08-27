@@ -4,6 +4,7 @@ import { scopedKey } from "../http/auth.js";
 import { proxyFetch } from "../http/proxy-fetch.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getGoogleClientId, getGoogleClientSecret } from "../storage/settings.js";
+import { HEALTHY, healthFromFailure, type AuthHealth } from "./auth-health.js";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -146,6 +147,17 @@ export class GmailOAuthProvider {
   private lastPollAt: number | null = null;
   private seenIds = new Set<string>();
 
+  // Whether Google has told us the stored credential is no longer usable.
+  // Surfaced through /v1/status so the extension can prompt for re-consent.
+  private authHealth: AuthHealth = HEALTHY;
+
+  private noteAuthFailure(status: number, body: string): void {
+    const health = healthFromFailure(status, body);
+    // Only ever escalate here: a transient failure must not silently clear a
+    // real re-auth warning. Clearing happens on demonstrated success.
+    if (health.needsReauth) this.authHealth = health;
+  }
+
   private deviceCode: { value: string; intervalSec: number; expiresAt: number } | null = null;
 
   // Pub/Sub state (loaded from secret store on demand).
@@ -190,6 +202,8 @@ export class GmailOAuthProvider {
       lastPollAt: this.lastPollAt,
       watchExpiration: this._watchExpiration,
       lastHistoryId: this._lastHistoryId,
+      needsReauth: this.authHealth.needsReauth,
+      reauthCode: this.authHealth.code,
     };
   }
 
@@ -536,11 +550,15 @@ export class GmailOAuthProvider {
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
+      this.noteAuthFailure(res.status, JSON.stringify(json));
       throw new Error(oauthError("refresh_failed", res.status, json));
     }
     const tok = json as TokenResponse;
     if (tok.refresh_token) await secretSet(this.refreshKey, tok.refresh_token);
     this.accessToken = { value: tok.access_token, expiresAt: Date.now() + tok.expires_in * 1000 };
+    // A successful refresh proves the credential is usable again — clear any
+    // stale warning so the user is not told to re-authorize forever.
+    this.authHealth = HEALTHY;
     return tok.access_token;
   }
 
@@ -582,6 +600,9 @@ export class GmailOAuthProvider {
         if (!listRes.ok) {
           const errText = await listRes.text().catch(() => "");
           console.error(`[gmail-poll] list failed (${query}): ${listRes.status} ${errText}`);
+          // This is where the production 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT
+          // lands — the signal that the grant no longer covers what we ask for.
+          this.noteAuthFailure(listRes.status, errText);
 
           // Handle 429 rate limit with exponential backoff
           if (listRes.status === 429) {
@@ -608,8 +629,10 @@ export class GmailOAuthProvider {
           throw new Error(`gmail_list_failed:${listRes.status}`);
         }
 
-        // Success — reset backoff
+        // Success — reset backoff. A completed list call is proof the token and
+        // its scopes work, so any re-auth warning is stale and must go.
         this.consecutiveErrors = 0;
+        this.authHealth = HEALTHY;
 
         const listJson = (await listRes.json()) as { messages?: Array<{ id?: string }> };
         const messages = Array.isArray(listJson.messages) ? listJson.messages : [];
