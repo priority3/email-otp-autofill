@@ -103,6 +103,28 @@ function stripHtml(html: string): string {
     .replace(/[ \t]+/g, " ");
 }
 
+/*
+ * Render an ImapFlow log entry as one short line.
+ *
+ * Allow-list, not a blacklist: an ImapFlow error can carry `executedCommand`,
+ * and for a failed LOGIN that string contains the password. Only these four
+ * fields are ever read, so no amount of extra context can leak into the log.
+ */
+export function describeLogEntry(obj: unknown): string {
+  if (typeof obj === "string") return obj;
+  if (!obj || typeof obj !== "object") return String(obj);
+  const e = obj as { msg?: unknown; err?: { message?: unknown; code?: unknown; responseStatus?: unknown } };
+  const parts: string[] = [];
+  if (e.msg) parts.push(String(e.msg));
+  const err = e.err;
+  if (err && typeof err === "object") {
+    if (err.message) parts.push(String(err.message));
+    if (err.code) parts.push(`code=${String(err.code)}`);
+    if (err.responseStatus) parts.push(`status=${String(err.responseStatus)}`);
+  }
+  return parts.length ? parts.join(" | ") : "(no detail)";
+}
+
 const JUNK_NAME_HINTS = [
   "junk",
   "spam",
@@ -175,7 +197,16 @@ export class ImapOtpWatcher {
       port: this.opts.port,
       secure: this.opts.secure,
       auth: { user: this.opts.auth.user, pass: this.opts.auth.pass },
-      logger: false,
+      // Reason: with logger:false, ImapFlow's own diagnosis is thrown away —
+      // including "IDLE recovery failed after timeout", which is the library
+      // telling us exactly why a connection died. debug/info stay off; they are
+      // per-command and would bury everything else.
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: (obj: unknown) => console.warn(`[imap ${this.opts.auth.user}] ${describeLogEntry(obj)}`),
+        error: (obj: unknown) => console.error(`[imap ${this.opts.auth.user}] ${describeLogEntry(obj)}`),
+      },
     });
     client.on("error", (err) => {
       this.lastError = err instanceof Error ? err.message : String(err);
