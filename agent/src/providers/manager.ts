@@ -224,7 +224,10 @@ export class ProviderManager {
         const ranMs = Date.now() - startedAt;
         const nextAttempt = ranMs >= RESET_AFTER_MS ? 0 : entry.attempt + 1;
         const delay = retryDelay(nextAttempt);
-        console.warn(`[otp-agent] qq watcher for ${email} stopped; retrying in ${Math.round(delay / 1000)}s`);
+        console.warn(
+          `[otp-agent] qq watcher for ${email} stopped (${entry.lastError ?? "no reason recorded"}); ` +
+            `retrying in ${Math.round(delay / 1000)}s`
+        );
 
         entry.retryTimer = setTimeout(() => {
           entry.retryTimer = null;
