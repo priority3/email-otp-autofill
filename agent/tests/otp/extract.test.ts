@@ -237,3 +237,40 @@ describe("extractTtlSec", () => {
     assert.equal(best?.ttlSec, 300);
   });
 });
+
+describe("opaque hex codes / no confidently-wrong fallback", () => {
+  // Regression: NodeSeek mails a 24-char hex token as the code. The old 10-char
+  // ceiling on mixed codes dropped it, and the extractor then surfaced an
+  // unrelated 8-digit number from elsewhere in the HTML as the code.
+  const HEX = "4c91be07d1aa3f620517cdb8";
+
+  it("extracts a long hex code that sits next to a keyword", () => {
+    const best = extractBestOtp(`nodeseek邮箱动态验证登录，你的验证码是${HEX}，不要告诉他人`);
+    assert.equal(best?.code, HEX);
+  });
+
+  it("still rejects a long hex token with no keyword beside it", () => {
+    // The gate is the keyword, not the length: an id in a code-flavoured mail
+    // must not become the answer.
+    assert.equal(extractBestOtp(`Your verification code could not be sent. Request id ${HEX}.`)?.code, undefined);
+  });
+
+  it("returns nothing rather than an unrelated number when the real code is unreadable", () => {
+    // The decisive case: a code-flavoured mail carrying a stray number far from
+    // any keyword. Showing that number would be confidently wrong — worse for
+    // the user than showing nothing, because they'd paste it and fail.
+    const body = [
+      "NodeSeek 邮箱动态验证登录",
+      "",
+      "Message reference 51352443",
+      "",
+      "如非本人操作请忽略本邮件。",
+    ].join("\n");
+    assert.equal(extractBestOtp(body), null);
+  });
+
+  it("a bare number stays extractable when a keyword is actually beside it", () => {
+    // Guards the opposite failure: the tightened gate must not silence real codes.
+    assert.equal(extractBestOtp("NodeSeek 登录\n\n验证码 51352443\n\n请勿泄露")?.code, "51352443");
+  });
+});
