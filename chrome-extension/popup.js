@@ -205,9 +205,11 @@ async function refresh() {
     setAgentPill(ok);
     // Multi-tenant instance but no valid session → prompt the user to log in.
     if (ok && r.status && r.status.multiTenant && !r.status.authenticated) needLogin = true;
+    renderReauthNotice(ok && r.status ? r.status.config : null);
   } catch {
     setText("agent", t(LANG, "agent_down"));
     setAgentPill(false);
+    renderReauthNotice(null);
   }
 
   if (needLogin) {
@@ -264,6 +266,24 @@ async function refresh() {
 }
 
 // Tint the agent status dot (.pill::before) green/red without depending on text.
+/*
+ * Surface "this mailbox stopped working" where the user actually looks.
+ *
+ * Someone whose codes stopped arriving opens the popup, not the settings page —
+ * and a mailbox with a revoked grant otherwise looks perfectly healthy there.
+ */
+function renderReauthNotice(config) {
+  const el = $("reauthNotice");
+  if (!el) return;
+  const broken = [];
+  if (config) {
+    if (config.outlook && config.outlook.needsReauth) broken.push("Outlook");
+    if (config.gmail && config.gmail.needsReauth) broken.push("Gmail");
+  }
+  el.hidden = broken.length === 0;
+  if (broken.length) el.textContent = t(LANG, "reauth_popup_notice", { names: broken.join(" / ") });
+}
+
 function setAgentPill(ok) {
   const el = $("agent");
   if (!el) return;
@@ -335,6 +355,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       e.preventDefault();
       goTo(1);
     }
+  });
+
+  $("reauthNotice").addEventListener("click", () => {
+    chrome.runtime.openOptionsPage();
   });
 
   $("settings").addEventListener("click", () => {

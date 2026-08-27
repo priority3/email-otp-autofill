@@ -817,6 +817,53 @@ input.input-error:focus {
   box-shadow: 0 0 7px rgba(88, 224, 143, 0.7);
 }
 
+/* Shown when the provider told us the stored grant no longer works. Loud on
+   purpose: the alternative is a mailbox that silently receives nothing. */
+.reauth-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Author `display` beats the UA stylesheet's `[hidden] { display: none }`, so
+   without this the banner stays on screen (empty) for healthy accounts. */
+.reauth-banner[hidden],
+.reauth-notice[hidden] {
+  display: none;
+}
+
+.reauth-banner .reauth-ic {
+  flex: none;
+}
+
+/* Popup variant: one tappable line, since the popup has no room for a panel. */
+.reauth-notice {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reauth-banner button {
+  flex: none;
+  margin-left: auto;
+}
+
 /* Credential is stored but the mailbox connection is down — the account will
    silently receive nothing, so it must not look the same as a healthy one. */
 .nav-dot.warn {
