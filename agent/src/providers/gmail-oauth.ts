@@ -5,6 +5,7 @@ import { proxyFetch } from "../http/proxy-fetch.js";
 import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getGoogleClientId, getGoogleClientSecret } from "../storage/settings.js";
 import { HEALTHY, healthFromFailure, type AuthHealth } from "./auth-health.js";
+import { PollLogger } from "./poll-log.js";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -155,7 +156,16 @@ export class GmailOAuthProvider {
     const health = healthFromFailure(status, body);
     // Only ever escalate here: a transient failure must not silently clear a
     // real re-auth warning. Clearing happens on demonstrated success.
-    if (health.needsReauth) this.authHealth = health;
+    if (health.needsReauth) {
+      // Announce the transition once: this is the only failure the user has to
+      // act on, and it otherwise looks just like "no mail arrived".
+      if (!this.authHealth.needsReauth) {
+        console.error(
+          `[gmail-poll ${this.userId.slice(0, 8)}] needs re-authorizing (${health.code}) — no codes will arrive until then`
+        );
+      }
+      this.authHealth = health;
+    }
   }
 
   private deviceCode: { value: string; intervalSec: number; expiresAt: number } | null = null;
@@ -181,7 +191,11 @@ export class GmailOAuthProvider {
     this.userId = userId;
     this.refreshKey = scopedKey(userId, "gmail_oauth:refresh");
     this.accountEmailKey = scopedKey(userId, "gmail_oauth:email");
+    this.log = new PollLogger(`[gmail-poll ${userId.slice(0, 8)}]`);
   }
+
+  // Short user prefix so one tenant's fault is distinguishable in a shared log.
+  private readonly log: PollLogger;
 
   // Instance-wide client ID/secret set by the admin.
   private get clientId(): string | null {
@@ -522,8 +536,20 @@ export class GmailOAuthProvider {
   startPolling(pollIntervalMs: number) {
     if (this.running) return;
     this.running = true;
-    this.pollTimer = setInterval(() => void this.pollOnce().catch(() => {}), pollIntervalMs);
-    void this.pollOnce().catch(() => {});
+    this.pollTimer = setInterval(() => void this.runPoll(), pollIntervalMs);
+    void this.runPoll();
+  }
+
+  /*
+   * pollOnce handles its own errors; this catches anything thrown outside that
+   * try block. It used to be `.catch(() => {})`, which dropped those silently.
+   */
+  private async runPoll(): Promise<void> {
+    try {
+      await this.pollOnce();
+    } catch (e) {
+      this.lastError = this.log.fail(e);
+    }
   }
 
   stop() {
@@ -699,10 +725,12 @@ export class GmailOAuthProvider {
       }
       this.lastError = null;
       this.lastPollAt = Date.now();
+      this.log.ok();
     } catch (e) {
-      this.lastError = String((e as any)?.message || e);
+      // The logger dedupes: a proxy flap across N accounts used to emit one
+      // opaque "fetch failed" line per account per poll, with no cause code.
+      this.lastError = this.log.fail(e);
       this.consecutiveErrors++;
-      console.error(`[gmail-poll] error: ${this.lastError}`);
     }
   }
 }
