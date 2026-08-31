@@ -103,6 +103,33 @@ function extractPlainText(payload: GmailMessagePart | undefined): string {
   return texts.join("\n");
 }
 
+/*
+ * Reduce a Google API error body to one short line.
+ *
+ * The interesting parts are `error.message` and the `reason` buried in
+ * `error.details[].reason` (e.g. ACCESS_TOKEN_SCOPE_INSUFFICIENT) — everything
+ * else is boilerplate that made each failure 26 lines long.
+ */
+export function summarizeApiError(body: string): string {
+  const text = String(body || "").trim();
+  if (!text) return "(no body)";
+  try {
+    const parsed = JSON.parse(text) as {
+      error?: { message?: string; status?: string; details?: Array<{ reason?: string }> };
+    };
+    const err = parsed.error;
+    if (!err) return text.slice(0, 200);
+    const reason =
+      err.details?.find((d) => d?.reason)?.reason ??
+      // Older shape puts it under errors[].reason.
+      (parsed as any).error?.errors?.find((e: any) => e?.reason)?.reason;
+    return [err.status, err.message, reason && `reason=${reason}`].filter(Boolean).join(" | ");
+  } catch {
+    // Not JSON — keep a bounded prefix rather than the whole page.
+    return text.replace(/\s+/g, " ").slice(0, 200);
+  }
+}
+
 function getHeader(headers: GmailMessageHeader[] | undefined, name: string): string {
   if (!headers) return "";
   const h = headers.find((h) => (h.name || "").toLowerCase() === name.toLowerCase());
@@ -127,6 +154,11 @@ function pubsubWatchLabelsKey(userId: string) {
 // one) so the default path issues exactly the same request it always did.
 const INBOX_QUERY = "is:unread";
 const SPAM_QUERY = "is:unread in:spam";
+
+// How often to retry a mailbox whose credential the provider has rejected.
+// Long enough to stop the flood, short enough that re-authorizing takes effect
+// without the user wondering whether anything happened.
+const REAUTH_RETRY_MS = 5 * 60 * 1000;
 
 // Label a stored OTP by where it came from, mirroring the folder field the
 // IMAP/Outlook providers set.
@@ -613,8 +645,20 @@ export class GmailOAuthProvider {
     const has = await this.hasRefreshToken();
     if (!has) return;
 
-    // Respect backoff period (from 429 errors)
+    // Respect backoff period (from 429 errors, or a credential the provider has
+    // already rejected)
     if (Date.now() < this.backoffUntil) return;
+
+    /*
+     * A credential the provider has rejected will not start working on its own —
+     * only the user re-authorizing fixes it. Polling every 5s until then burns
+     * quota and floods the log for nothing (one account produced 19k failed
+     * calls). Slow right down, but keep a slow retry so the account resumes on
+     * its own once the user does re-authorize, with no restart needed.
+     */
+    if (this.authHealth.needsReauth) {
+      this.backoffUntil = Date.now() + REAUTH_RETRY_MS;
+    }
 
     try {
       const token = await this.ensureAccessToken();
@@ -629,7 +673,11 @@ export class GmailOAuthProvider {
         const listRes = await proxyFetch(listUrl, { headers: { authorization: `Bearer ${token}` } });
         if (!listRes.ok) {
           const errText = await listRes.text().catch(() => "");
-          console.error(`[gmail-poll] list failed (${query}): ${listRes.status} ${errText}`);
+          // Reason: this printed the whole JSON error body — ~26 pretty-printed
+          // lines every 5 seconds for as long as the fault lasted. One broken
+          // account produced 19k of them (497k lines, 99.4% of the log). Route
+          // it through PollLogger, which states a fault once and then summarizes.
+          this.log.fail(new Error(`list failed (${query}): ${listRes.status} ${summarizeApiError(errText)}`));
           // This is where the production 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT
           // lands — the signal that the grant no longer covers what we ask for.
           this.noteAuthFailure(listRes.status, errText);
