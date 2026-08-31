@@ -38,3 +38,62 @@ jobs:
 
       - name: Unit tests
         run: npm test
+
+  # Extension code can only reach users through a manifest version bump — that
+  # is what triggers publish-extension.yml. Nothing enforces the two happen
+  # together, and they drifted: 0.1.5 shipped on 2026-08-26, two later PRs
+  # changed the extension without bumping, and the re-auth UI sat unpublished
+  # for days while a user with a broken Gmail grant saw "connected".
+  #
+  # This reports the backlog rather than blocking anything. Batching several
+  # merges into one release is legitimate, so failing per-PR would cry wolf;
+  # the risk is only ever forgetting, and a forgotten backlog is exactly what a
+  # standing report catches.
+  extension-release-backlog:
+    name: extension release backlog
+    runs-on: ubuntu-latest
+    # Post-merge only: on a PR the answer is almost always "not yet", which is fine.
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need history to find the last version bump
+
+      - name: Report unpublished extension changes
+        run: |
+          set -euo pipefail
+          MANIFEST=chrome-extension/manifest.json
+          VERSION=$(node -p "require('./$MANIFEST').version")
+
+          # The newest commit that added or removed a `"version": "..."` line.
+          LAST_BUMP=$(git log -1 --format=%H -G'"version":[[:space:]]*"' -- "$MANIFEST" || true)
+          if [ -z "$LAST_BUMP" ]; then
+            echo "No version change found in history — nothing to compare against."
+            exit 0
+          fi
+
+          PENDING=$(git log --format='- `%h` %s' "$LAST_BUMP"..HEAD -- chrome-extension/ || true)
+
+          {
+            echo "### Extension release status"
+            echo ""
+            echo "- manifest version on \`main\`: \`$VERSION\`"
+            echo "- last bumped by: \`$(git log --format='%h %s' -1 "$LAST_BUMP")\`"
+            echo ""
+            if [ -z "$PENDING" ]; then
+              echo "Nothing unpublished — every extension change is covered by \`$VERSION\`."
+            else
+              COUNT=$(printf '%s\n' "$PENDING" | grep -c '^-' || true)
+              echo "**$COUNT commit(s) changed the extension since \`$VERSION\` was cut.**"
+              echo "They will not reach users until the version is bumped:"
+              echo ""
+              printf '%s\n' "$PENDING"
+              echo ""
+              echo "Bump \`version\` in \`$MANIFEST\` to publish them."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$PENDING" ]; then
+            COUNT=$(printf '%s\n' "$PENDING" | grep -c '^-' || true)
+            echo "::warning file=$MANIFEST::$COUNT extension commit(s) are unpublished — version is still $VERSION. Bump it to release them."
+          fi
