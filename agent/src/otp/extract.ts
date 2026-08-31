@@ -145,11 +145,40 @@ function isNumericFragment(text: string, start: number, matched: string): boolea
  * 0 means digits only. Pure-digit codes keep their own 4–8 range regardless,
  * since a long digit run is an account or order number, never an OTP.
  */
+/*
+ * Digit content required of a mixed letter+digit code.
+ *
+ * A word with a digit stuck on the end is a username or a label, not a code —
+ * "验证码已发送至 priority1 的邮箱" handed the user "priority1" as their OTP.
+ * The same shape burned us before as "autofill85" (see ALNUM_CODE_PATTERN).
+ *
+ * Real alnum codes carry far more digits than that. Measured against the codes
+ * this extractor is known to handle:
+ *
+ *   priority1                 1/9  = 11%   ← username
+ *   autofill85                2/10 = 20%   ← word + number
+ *   d6ad3e                    2/6  = 33%
+ *   G7HK2P / A1B2C3 / ABC123  ≥33%
+ *   7a38ff0ab00ff1780989bfe0  14/24 = 58%  ← NodeSeek hex token
+ *
+ * so a floor of two digits and a quarter of the length separates them with room
+ * to spare. A single stray digit can never carry a candidate on its own.
+ */
+const ALNUM_MIN_DIGITS = 2;
+const ALNUM_MIN_DIGIT_RATIO = 0.25;
+
+function hasCodeLikeDigits(code: string): boolean {
+  const digits = (code.match(/\d/g) || []).length;
+  return digits >= ALNUM_MIN_DIGITS && digits / code.length >= ALNUM_MIN_DIGIT_RATIO;
+}
+
 function isCodeShape(code: string, alnumMax: number): boolean {
   if (!/^[A-Za-z0-9]+$/.test(code)) return false;
   if (/^\d+$/.test(code)) return code.length >= 4 && code.length <= 8;
   if (alnumMax <= 0) return false;
-  return code.length >= 4 && code.length <= alnumMax && /[A-Za-z]/.test(code) && /\d/.test(code);
+  if (code.length < 4 || code.length > alnumMax) return false;
+  if (!/[A-Za-z]/.test(code)) return false;
+  return hasCodeLikeDigits(code);
 }
 
 export function extractOtpCandidates(raw: string): OtpCandidate[] {
