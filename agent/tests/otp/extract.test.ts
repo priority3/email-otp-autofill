@@ -312,3 +312,45 @@ describe("username-shaped tokens are not codes", () => {
     assert.equal(extractBestOtp("Your verification code is 314159")?.code, "314159");
   });
 });
+
+describe("code-word phrasings beyond \"verification code\"", () => {
+  it("reads the real Backblaze mail that returned nothing in production", () => {
+    // Captured from the user's mailbox after the poller logged otp=no for it.
+    // The body says "Backblaze Authorization Code: 473718" — no phrase in the
+    // keyword list matched, so the extractor produced zero candidates and the
+    // popup stayed empty.
+    const body = [
+      "Backblaze Authentication",
+      "This Backblaze Authorization code is required for security purposes.",
+      "Backblaze Authorization Code: 473718",
+      "Code expires in 20 minutes.",
+      "This is a Backblaze service email | www.backblaze.com",
+    ].join("\n");
+    assert.equal(extractBestOtp(body)?.code, "473718");
+    assert.equal(extractTtlSec(body), 20 * 60);
+  });
+
+  it("covers the other <word> code phrasings senders actually use", () => {
+    const cases: Array<[string, string]> = [
+      ["Here is your GitHub launch code: 771208", "771208"],
+      ["Your authentication code is 654321", "654321"],
+      ["Your confirmation code: 112233", "112233"],
+      ["Enter this access code: 998877", "998877"],
+      ["Your auth code is 445566", "445566"],
+      ["Your passcode is 334455", "334455"],
+      ["动态密码：667788", "667788"],
+    ];
+    for (const [text, want] of cases) {
+      assert.equal(extractBestOtp(text)?.code, want, `failed on ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("does not fire on an OAuth explainer that merely says \"authorization code\"", () => {
+    // The phrase also belongs to OAuth prose. Such mails carry no short code
+    // beside it, which is what keeps the addition safe.
+    assert.equal(
+      extractBestOtp("We use the OAuth 2.0 authorization code flow for our API. See docs section 12345678."),
+      null
+    );
+  });
+});
