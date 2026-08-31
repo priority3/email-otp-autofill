@@ -274,3 +274,41 @@ describe("opaque hex codes / no confidently-wrong fallback", () => {
     assert.equal(extractBestOtp("NodeSeek 登录\n\n验证码 51352443\n\n请勿泄露")?.code, "51352443");
   });
 });
+
+describe("username-shaped tokens are not codes", () => {
+  it("does not hand back a username sitting next to the keyword", () => {
+    // Reported from production: the popup showed "priority1" as the user's OTP.
+    // A keyword followed by a word-with-a-trailing-digit is an account name, a
+    // label or a filename — never a verification code.
+    assert.equal(extractBestOtp("验证码已发送至 priority1 的邮箱"), null);
+  });
+
+  it("rejects the word+number shape that burned us before", () => {
+    // "email otp autofill" welded to "85% off" once produced "autofill85".
+    assert.equal(extractBestOtp("your verification code autofill85"), null);
+  });
+
+  it("one stray digit can never carry a candidate", () => {
+    for (const token of ["verification1", "securitycode7", "passcodeX9".replace("X", "")]) {
+      assert.equal(extractBestOtp(`验证码 ${token}`), null, `${token} must not be a code`);
+    }
+  });
+
+  it("still accepts real mixed codes across the density range", () => {
+    // Everything the extractor is known to handle must survive the new floor.
+    const cases: Array<[string, string]> = [
+      ["验证码为: d6ad3e", "d6ad3e"],
+      ["your verification code is A1B2C3", "A1B2C3"],
+      ["verification code: ABC123", "ABC123"],
+      ["您好，你的验证码是7a38ff0ab00ff1780989bfe0，请在10分钟内使用。", "7a38ff0ab00ff1780989bfe0"],
+    ];
+    for (const [text, want] of cases) {
+      assert.equal(extractBestOtp(text)?.code, want, `failed on ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("pure-digit codes are unaffected by the digit-ratio rule", () => {
+    assert.equal(extractBestOtp("验证码 481920")?.code, "481920");
+    assert.equal(extractBestOtp("Your verification code is 314159")?.code, "314159");
+  });
+});
