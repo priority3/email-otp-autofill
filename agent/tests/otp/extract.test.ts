@@ -274,3 +274,83 @@ describe("opaque hex codes / no confidently-wrong fallback", () => {
     assert.equal(extractBestOtp("NodeSeek 登录\n\n验证码 51352443\n\n请勿泄露")?.code, "51352443");
   });
 });
+
+describe("username-shaped tokens are not codes", () => {
+  it("does not hand back a username sitting next to the keyword", () => {
+    // Reported from production: the popup showed "priority1" as the user's OTP.
+    // A keyword followed by a word-with-a-trailing-digit is an account name, a
+    // label or a filename — never a verification code.
+    assert.equal(extractBestOtp("验证码已发送至 priority1 的邮箱"), null);
+  });
+
+  it("rejects the word+number shape that burned us before", () => {
+    // "email otp autofill" welded to "85% off" once produced "autofill85".
+    assert.equal(extractBestOtp("your verification code autofill85"), null);
+  });
+
+  it("one stray digit can never carry a candidate", () => {
+    for (const token of ["verification1", "securitycode7", "passcodeX9".replace("X", "")]) {
+      assert.equal(extractBestOtp(`验证码 ${token}`), null, `${token} must not be a code`);
+    }
+  });
+
+  it("still accepts real mixed codes across the density range", () => {
+    // Everything the extractor is known to handle must survive the new floor.
+    const cases: Array<[string, string]> = [
+      ["验证码为: d6ad3e", "d6ad3e"],
+      ["your verification code is A1B2C3", "A1B2C3"],
+      ["verification code: ABC123", "ABC123"],
+      ["您好，你的验证码是7a38ff0ab00ff1780989bfe0，请在10分钟内使用。", "7a38ff0ab00ff1780989bfe0"],
+    ];
+    for (const [text, want] of cases) {
+      assert.equal(extractBestOtp(text)?.code, want, `failed on ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("pure-digit codes are unaffected by the digit-ratio rule", () => {
+    assert.equal(extractBestOtp("验证码 481920")?.code, "481920");
+    assert.equal(extractBestOtp("Your verification code is 314159")?.code, "314159");
+  });
+});
+
+describe("code-word phrasings beyond \"verification code\"", () => {
+  it("reads the real Backblaze mail that returned nothing in production", () => {
+    // Captured from the user's mailbox after the poller logged otp=no for it.
+    // The body says "Backblaze Authorization Code: 473718" — no phrase in the
+    // keyword list matched, so the extractor produced zero candidates and the
+    // popup stayed empty.
+    const body = [
+      "Backblaze Authentication",
+      "This Backblaze Authorization code is required for security purposes.",
+      "Backblaze Authorization Code: 473718",
+      "Code expires in 20 minutes.",
+      "This is a Backblaze service email | www.backblaze.com",
+    ].join("\n");
+    assert.equal(extractBestOtp(body)?.code, "473718");
+    assert.equal(extractTtlSec(body), 20 * 60);
+  });
+
+  it("covers the other <word> code phrasings senders actually use", () => {
+    const cases: Array<[string, string]> = [
+      ["Here is your GitHub launch code: 771208", "771208"],
+      ["Your authentication code is 654321", "654321"],
+      ["Your confirmation code: 112233", "112233"],
+      ["Enter this access code: 998877", "998877"],
+      ["Your auth code is 445566", "445566"],
+      ["Your passcode is 334455", "334455"],
+      ["动态密码：667788", "667788"],
+    ];
+    for (const [text, want] of cases) {
+      assert.equal(extractBestOtp(text)?.code, want, `failed on ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("does not fire on an OAuth explainer that merely says \"authorization code\"", () => {
+    // The phrase also belongs to OAuth prose. Such mails carry no short code
+    // beside it, which is what keeps the addition safe.
+    assert.equal(
+      extractBestOtp("We use the OAuth 2.0 authorization code flow for our API. See docs section 12345678."),
+      null
+    );
+  });
+});

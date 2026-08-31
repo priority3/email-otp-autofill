@@ -392,7 +392,11 @@ export class OutlookOAuthProvider {
            * way to tell a mail that was never fetched from one whose code the
            * extractor missed. Id and yes/no only: no subject, no code.
            */
-          console.log(`${this.logLabel} processed ${id.slice(0, 16)}: otp=${best ? "yes" : "no"}`);
+          // Reason: Graph message ids encode mailbox and folder up front, so
+          // every id in one mailbox shares a long prefix — slicing from the
+          // start produced identical labels for different mails, which made the
+          // line useless for telling messages apart. The tail is what varies.
+          console.log(`${this.logLabel} processed …${id.slice(-16)}: otp=${best ? "yes" : "no"}`);
           if (!best) continue;
 
           this.store.add({
