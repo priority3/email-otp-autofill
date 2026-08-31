@@ -29,6 +29,28 @@ const KEYWORD_SOURCES = [
   "\\bsecurity code\\b",
   "\\blogin code\\b",
   "single[\\s-]?use code",
+  /*
+   * Other "<word> code" phrasings real senders use. Each was a live miss:
+   * Backblaze mails "Backblaze Authorization Code: 473718" and GitHub uses
+   * "launch code", neither of which matched anything above — the extractor
+   * returned nothing at all and the user saw an empty popup.
+   *
+   * These are safe to add because the pattern is a specific noun pinned to the
+   * word "code": "authorization code" only shows up in an OAuth explainer, and
+   * such mails do not carry a 4-8 digit number right beside it.
+   */
+  "authoriz(?:ation|ed)?[\\s-]?code",
+  "authentication code",
+  "\\blaunch code\\b",
+  "confirmation code",
+  "\\baccess code\\b",
+  "\\bauth code\\b",
+  "\\bpasscode\\b",
+  "\\bPIN code\\b",
+  "动态密码",
+  "動態密碼",
+  "校验代码",
+  "校驗代碼",
   // SaaS signup mails (Google-style / SpaceXAI / etc.) often say "use the code
   // below to validate your email" rather than "verification code".
   "validate your email",
