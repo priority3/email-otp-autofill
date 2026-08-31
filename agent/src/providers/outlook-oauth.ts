@@ -40,6 +40,9 @@ type GraphMessageBody = {
 const DEVICE_CODE_SCOPE = "offline_access Mail.Read User.Read openid profile email";
 const REFRESH_SCOPE = "offline_access Mail.Read";
 
+// Retry interval for a mailbox whose credential Microsoft has rejected.
+const REAUTH_RETRY_MS = 5 * 60 * 1000;
+
 function formEncode(obj: Record<string, string>): string {
   return Object.entries(obj)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
@@ -105,6 +108,8 @@ export class OutlookOAuthProvider {
 
   // Whether Microsoft has told us the stored credential is no longer usable.
   private authHealth: AuthHealth = HEALTHY;
+  // Suppresses polling until this timestamp (set when the credential is rejected).
+  private backoffUntil = 0;
 
   private noteAuthFailure(status: number, body: string): void {
     const health = healthFromFailure(status, body);
@@ -337,6 +342,14 @@ export class OutlookOAuthProvider {
       this.log.note("skipped: mailbox not connected (no refresh token)");
       return;
     }
+
+    // Same reasoning as the Gmail poller: a rejected credential only recovers
+    // when the user re-authorizes, so back off instead of hammering Graph.
+    if (Date.now() < this.backoffUntil) return;
+    if (this.authHealth.needsReauth) {
+      this.backoffUntil = Date.now() + REAUTH_RETRY_MS;
+    }
+
     try {
       const token = await this.ensureAccessToken();
       const now = Date.now();
@@ -373,6 +386,13 @@ export class OutlookOAuthProvider {
           const best = extractBestOtp(`${subject}\n${preview}\n${bodyText}`);
           this.seenIds.add(seenKey);
           if (this.seenIds.size > 200) this.seenIds = new Set([...this.seenIds].slice(-150));
+          /*
+           * Reason: this provider logged nothing per message, so "Outlook never
+           * gave me the code" was unanswerable from the server — there was no
+           * way to tell a mail that was never fetched from one whose code the
+           * extractor missed. Id and yes/no only: no subject, no code.
+           */
+          console.log(`${this.logLabel} processed ${id.slice(0, 16)}: otp=${best ? "yes" : "no"}`);
           if (!best) continue;
 
           this.store.add({
