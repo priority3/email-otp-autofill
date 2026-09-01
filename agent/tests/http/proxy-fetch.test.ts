@@ -1,6 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { errorCode, isRetryable, bodyIsReplayable, withConnectRetry } from "../../src/http/proxy-fetch.js";
+import { errorCode, isRetryable, bodyIsReplayable, withConnectRetry, parseEnvInt } from "../../src/http/proxy-fetch.js";
+
+/** Run `fn` with console.warn muted, and hand back whatever it wrote. */
+function captureWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+  try {
+    return { result: fn(), warnings };
+  } finally {
+    console.warn = original;
+  }
+}
 
 /*
  * The shape undici actually throws: a bare TypeError whose `cause` carries the
@@ -12,6 +24,51 @@ function undiciError(code: string, depth = 1): Error {
   for (let i = 1; i < depth; i++) inner = Object.assign(new Error("wrapped"), { cause: inner });
   return Object.assign(new TypeError("fetch failed"), { cause: inner });
 }
+
+/*
+ * The agent is self-hosted, so the network it runs on is not ours to assume.
+ * Retrying a connect failure is safe everywhere, but how long to wait on a
+ * stalled attempt is a property of the link — these knobs are how an operator
+ * on a slow line buys more patience, or turns retrying off entirely.
+ */
+describe("parseEnvInt", () => {
+  it("falls back when the variable is unset or blank", () => {
+    assert.equal(parseEnvInt(undefined, 4000, 500, 60000), 4000);
+    assert.equal(parseEnvInt("", 4000, 500, 60000), 4000);
+    assert.equal(parseEnvInt("   ", 4000, 500, 60000), 4000);
+  });
+
+  it("takes a valid value, ignoring surrounding whitespace", () => {
+    assert.equal(parseEnvInt("8000", 4000, 500, 60000), 8000);
+    assert.equal(parseEnvInt(" 8000 ", 4000, 500, 60000), 8000);
+  });
+
+  it("lets attempts=1 through, which is how retrying is switched off", () => {
+    assert.equal(parseEnvInt("1", 3, 1, 5), 1);
+  });
+
+  it("clamps out-of-range values and says so", () => {
+    const low = captureWarnings(() => parseEnvInt("10", 4000, 500, 60000, "T"));
+    assert.equal(low.result, 500);
+    assert.match(low.warnings.join(""), /out of range/);
+
+    const high = captureWarnings(() => parseEnvInt("999999", 4000, 500, 60000, "T"));
+    assert.equal(high.result, 60000);
+  });
+
+  it("rejects values that are not integers, and warns rather than failing silently", () => {
+    for (const bad of ["abc", "4.5", "NaN", "1e3ms", "-"]) {
+      const { result, warnings } = captureWarnings(() => parseEnvInt(bad, 4000, 500, 60000, "T"));
+      assert.equal(result, 4000, bad);
+      assert.match(warnings.join(""), /not an integer/, bad);
+    }
+  });
+
+  it("does not warn when the value is accepted as given", () => {
+    const { warnings } = captureWarnings(() => parseEnvInt("8000", 4000, 500, 60000, "T"));
+    assert.deepEqual(warnings, []);
+  });
+});
 
 describe("errorCode", () => {
   it("digs the code out of the TypeError/cause shape undici throws", () => {

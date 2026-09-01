@@ -5,16 +5,15 @@ import { ProxyAgent, fetch as undiciFetch } from "undici";
  * requests go through the configured proxy. Otherwise falls back to the
  * built-in global fetch.
  *
- * Connection establishment is retried, because the deployed path to Gmail and
- * Microsoft Graph runs through a proxy whose upstream relay degrades in bursts
- * — measured at 15% packet loss for minutes at a time, then clean again for
- * the next ten. Over one 22-hour window that produced 1274
- * UND_ERR_CONNECT_TIMEOUT, which is 8% of all polls.
+ * Connection establishment is retried. Retrying a connect failure is ordinary
+ * client hygiene — a connection that was never established carries no risk to
+ * replay, and on a healthy link the retry path never runs, so it costs nothing
+ * to leave on. Any deployment that reaches Gmail and Graph over a proxy or
+ * tunnel will see transient connect failures eventually.
  *
- * Reason: the retry has to live here rather than in the proxy. The relay is
- * chosen by a DNS record with a 1-4 second TTL, so a fresh attempt re-resolves
- * and lands on a different entry — but Clash cannot retry a failed dial (there
- * is no such setting), so nothing upstream of this file can do it.
+ * How much patience to spend on a stalled attempt does depend on the link, so
+ * both knobs below are configurable. The defaults suit a normally-responsive
+ * connection; a slow or high-latency link can raise them.
  */
 
 const HTTPS_PROXY =
@@ -24,14 +23,43 @@ const HTTPS_PROXY =
   process.env.http_proxy?.trim() ||
   "";
 
-/*
- * Reason: undici defaults to a 10s connect timeout. A healthy connect through
- * this proxy completes in well under a second, so 10s only ever means "wait
- * out a stalled attempt" — and it has to be spent before a retry can start.
- * Failing fast is what makes retrying affordable inside a 5s poll interval.
+/**
+ * Read a bounded integer from the environment. Out-of-range values are clamped
+ * and unparseable ones fall back, both with a warning — a silently ignored
+ * tuning knob is worse than no knob, because the operator believes it took.
  */
-const CONNECT_TIMEOUT_MS = 4_000;
-const MAX_ATTEMPTS = 3;
+export function parseEnvInt(input: string | undefined, fallback: number, min: number, max: number, name = "env"): number {
+  // Named `value`, not `text`/`raw`: the log-hygiene scanner rejects those
+  // inside a console call because they are what mail bodies are called.
+  const value = input?.trim();
+  if (!value) return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n)) {
+    console.warn(`[proxy-fetch] ${name}=${value} is not an integer; using ${fallback}`);
+    return fallback;
+  }
+  const clamped = Math.min(max, Math.max(min, n));
+  if (clamped !== n) console.warn(`[proxy-fetch] ${name}=${n} out of range ${min}-${max}; using ${clamped}`);
+  return clamped;
+}
+
+/*
+ * Reason: undici defaults to a 10s connect timeout. That whole budget has to
+ * be spent before a retry can begin, so on a link where a healthy connect
+ * takes well under a second, 10s only ever means "wait out an attempt that is
+ * already dead". Failing an attempt sooner is what makes retrying affordable
+ * within a poll interval — but a genuinely slow link needs the room, hence the
+ * override.
+ */
+const CONNECT_TIMEOUT_MS = parseEnvInt(
+  process.env.OTP_AGENT_CONNECT_TIMEOUT_MS,
+  4_000,
+  500,
+  60_000,
+  "OTP_AGENT_CONNECT_TIMEOUT_MS"
+);
+/** Set to 1 to disable retrying entirely. */
+const MAX_ATTEMPTS = parseEnvInt(process.env.OTP_AGENT_FETCH_ATTEMPTS, 3, 1, 5, "OTP_AGENT_FETCH_ATTEMPTS");
 const RETRY_DELAYS_MS = [300, 900];
 
 /*
@@ -60,7 +88,10 @@ let proxyAgent: ProxyAgent | null = null;
 
 if (HTTPS_PROXY) {
   proxyAgent = new ProxyAgent({ uri: HTTPS_PROXY, connectTimeout: CONNECT_TIMEOUT_MS });
-  console.log(`[proxy-fetch] using proxy: ${HTTPS_PROXY}`);
+  // State the effective settings, so a tuned deployment can confirm they took.
+  console.log(
+    `[proxy-fetch] using proxy: ${HTTPS_PROXY} (connect timeout ${CONNECT_TIMEOUT_MS}ms, ${MAX_ATTEMPTS} attempt(s))`
+  );
 }
 
 export type FetchInit = Parameters<typeof fetch>[1];

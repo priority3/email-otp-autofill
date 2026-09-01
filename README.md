@@ -162,6 +162,29 @@ docker compose up -d --build
   token to manage invite codes, users, and view stats. Toggle "invite required"
   there if you want closed signup.
 
+### Outbound network (optional)
+
+Gmail and Outlook are reached through Google's and Microsoft's APIs. If your
+server cannot reach them directly, set `HTTPS_PROXY` (or `HTTP_PROXY`) and every
+outbound request from the agent goes through it:
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890
+```
+
+Connect failures are retried automatically — a connection that was never
+established carries no request to duplicate — and on a healthy link the retry
+path never runs. How long to wait on a stalled attempt does depend on the link,
+so both knobs are adjustable. **The defaults suit a normally-responsive
+connection; raise them on a slow or high-latency line:**
+
+```bash
+OTP_AGENT_CONNECT_TIMEOUT_MS=4000   # per-attempt connect timeout (default 4000, range 500-60000)
+OTP_AGENT_FETCH_ATTEMPTS=3          # attempts per request (default 3; set to 1 to disable retrying)
+```
+
+The startup log prints the values actually in effect.
+
 ### Configure OAuth credentials (self-host)
 
 **Required if you want Outlook or Gmail to work.** These credentials are
