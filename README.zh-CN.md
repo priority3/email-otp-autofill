@@ -129,6 +129,26 @@ docker compose up -d --build
 - **管理员（你）**：打开 `https://your.domain.tld/admin`，用管理 token 登录，管理邀请
   码、用户并查看统计。需要封闭注册就在那里打开「需邀请码」。
 
+### 出站网络（可选）
+
+Gmail 与 Outlook 走 Google / Microsoft 的 API。如果你的服务器到不了它们，设置
+`HTTPS_PROXY`（或 `HTTP_PROXY`），agent 的全部出站请求都会走该代理：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890
+```
+
+连接建立失败会自动重试（连接没建立起来时请求根本没发出，重放是安全的），健康的
+线路上这条路径永远不会触发。等待一个卡住的连接要花多久取决于线路，所以留了两个
+旋钮，**默认值适用于正常响应的网络，线路慢就调大**：
+
+```bash
+OTP_AGENT_CONNECT_TIMEOUT_MS=4000   # 单次连接超时（默认 4000，范围 500-60000）
+OTP_AGENT_FETCH_ATTEMPTS=3          # 尝试次数（默认 3，设为 1 即关闭重试）
+```
+
+启动日志会打印实际生效的值。
+
 ### 配置 OAuth 凭据（自部署）
 
 **想让 Outlook 或 Gmail 可用，这步是必须的。** 这些凭据是全实例共用的：你在
