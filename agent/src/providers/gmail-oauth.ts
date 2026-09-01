@@ -6,6 +6,7 @@ import { secretDelete, secretGet, secretSet } from "../storage/secrets.js";
 import { getGoogleClientId, getGoogleClientSecret } from "../storage/settings.js";
 import { HEALTHY, healthFromFailure, type AuthHealth } from "./auth-health.js";
 import { PollLogger } from "./poll-log.js";
+import { singleFlight } from "./single-flight.js";
 
 type DeviceCodeResponse = {
   device_code: string;
@@ -575,14 +576,17 @@ export class GmailOAuthProvider {
   /*
    * pollOnce handles its own errors; this catches anything thrown outside that
    * try block. It used to be `.catch(() => {})`, which dropped those silently.
+   *
+   * singleFlight: a tick that arrives while the previous poll is still running
+   * is dropped rather than stacked. See src/providers/single-flight.ts.
    */
-  private async runPoll(): Promise<void> {
+  private runPoll = singleFlight(async (): Promise<void> => {
     try {
       await this.pollOnce();
     } catch (e) {
       this.lastError = this.log.fail(e);
     }
-  }
+  });
 
   stop() {
     this.running = false;
