@@ -353,4 +353,56 @@ describe("code-word phrasings beyond \"verification code\"", () => {
       null
     );
   });
+
+  /*
+   * CSS colour values look exactly like a six-digit OTP, and HTML mail inlines
+   * its palette in every style attribute. Before stripCssColors existed, the
+   * OpenAI login-code mail returned its own background colour as the code —
+   * submitting it answered "Incorrect code", and retrying looked like flaky
+   * network behaviour rather than a wrong number. See stripCssColors.
+   */
+  it("ignores a six-digit CSS colour sitting next to the keyword", () => {
+    // Your verification code … then real code, with #202123 closer to "code".
+    const near = "Your login code is\n<span style=\"color:#202123\">high contrast</span>\n980925";
+    assert.notEqual(extractBestOtp(near)?.code, "202123");
+    // The colour may not even survive into the candidate list.
+    assert.ok(!extractOtpCandidates(near).some((c) => c.code === "202123"));
+  });
+
+  it("ignores CSS colours in the imap subject+text+html concatenation path", () => {
+    // imap.ts feeds `${subject}\n${text}\n${html}` — a stylesheet that leaks
+    // into the text part lands upstream of the real code.
+    const mail = [
+      "Your temporary OpenAI login code",
+      "结果发现: color:#202123;font-size:14px;line-height:24px;color:#353740",
+      "980925",
+    ].join("\n");
+    for (const bad of ["202123", "353740"]) {
+      assert.ok(!extractOtpCandidates(mail).some((c) => c.code === bad),
+        `CSS colour ${bad} leaked into candidates`);
+    }
+  });
+
+  it("still reads the real code when the palette leaked nearby", () => {
+    // Regression guard the other way: stripping colours must not break the
+    // case that already worked (stripHtml + keyword-adjacent real code).
+    const mail = [
+      "p{color:#202123} td{color:#353740}",
+      "Your temporary OpenAI login code",
+      "980925",
+    ].join("\n");
+    assert.equal(extractBestOtp(mail)?.code, "980925");
+  });
+
+  it("still extracts a bare hex token that is the code itself", () => {
+    // NodeSeek mails an opaque hex token rather than digits. It has no leading
+    // '#', so it is NOT a colour and must survive stripCssColors untouched.
+    assert.equal(extractBestOtp("你的验证码是 7a38ff0ab00ff1780989bfe0")?.code,
+      "7a38ff0ab00ff1780989bfe0");
+  });
+
+  it("ignores decimal channels written as rgb()/hsl() notation", () => {
+    const mail = "Your verification code:\n<div style=\"color:rgb(32,33,35)\"> hi </div>\n980925";
+    assert.ok(!extractOtpCandidates(mail).some((c) => ["32", "33", "35", "323335"].includes(c.code)));
+  });
 });
