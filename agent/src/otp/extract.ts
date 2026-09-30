@@ -122,6 +122,35 @@ function stripUrls(s: string): string {
   );
 }
 
+/*
+ * Drop CSS colour values before scanning for codes.
+ *
+ * Reason: HTML mail carries its palette inline — in `style` attributes and in
+ * `<style>` blocks. OpenAI's login-code mail alone inlines
+ * `background-color:#ffffff;color:#202123` and `color:#353740`, and both are
+ * exactly six digits. The near-keyword pass therefore returned 202123/353740
+ * as *the* OTP while the real code sat further from the keyword, so the user
+ * was handed a confidently wrong number (submitting it to OpenAI answers
+ * "Incorrect code").
+ *
+ * Scope is deliberately narrow: only values introduced by `#` or wrapped in
+ * rgb()/hsl() notation are removed. A *bare* hex token is left untouched on
+ * purpose — NodeSeek legitimately mails an opaque 24-char one
+ * ("你的验证码是 7a38ff0ab00ff1780989bfe0"), and that must keep working.
+ */
+function stripCssColors(s: string): string {
+  return (
+    s
+      // #rgb / #rgba / #rrggbb / #rrggbbaa. The negative lookahead keeps a
+      // longer hex run from being nibbled from the left ("#ffffffabc" is not a
+      // colour, so it stays intact rather than losing its first 8 chars).
+      .replace(/#[0-9a-fA-F]{3,8}(?![0-9a-fA-F])/g, " ")
+      // rgb()/hsl() write their channels as plain decimals, which look exactly
+      // like a short digit code to the keyword passes.
+      .replace(/\b(?:rgba?|hsla?)\([^)]*\)/gi, " ")
+  );
+}
+
 function keywordBoost(context: string): number {
   const ctx = context.slice(0, 120);
   let boost = 0;
@@ -204,7 +233,7 @@ function isCodeShape(code: string, alnumMax: number): boolean {
 }
 
 export function extractOtpCandidates(raw: string): OtpCandidate[] {
-  const text = stripUrls(normalize(raw));
+  const text = stripCssColors(stripUrls(normalize(raw)));
   const candidates: OtpCandidate[] = [];
 
   // Build a candidate, applying the year rule consistently. A year-shaped
